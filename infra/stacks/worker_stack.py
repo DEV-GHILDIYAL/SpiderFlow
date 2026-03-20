@@ -42,7 +42,7 @@ class WorkerStack(cdk.Stack):
             "WorkerCluster",
             cluster_name="spiderflow-workers",
             vpc=vpc,
-            container_insights_v2=ecs.ContainerInsights.ENABLED,
+            container_insights=True,
         )
 
         # ── Log Group ──

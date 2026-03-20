@@ -272,3 +272,77 @@ body {
 .pulse-glow {
   animation: pulseGlow 2s ease-in-out infinite;
 }
+
+/* ── Slide-over Panel ── */
+.slide-over-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  opacity: 0;
+  animation: fadeInOverlay 0.3s ease forwards;
+}
+
+.slide-over-panel {
+  width: 100%;
+  max-width: 500px;
+  height: 100%;
+  background: var(--sf-surface);
+  border-left: 1px solid var(--sf-border);
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  position: relative;
+  overflow-y: auto;
+}
+
+@keyframes fadeInOverlay {
+  to { opacity: 1; }
+}
+
+@keyframes slideInRight {
+  to { transform: translateX(0); }
+}
+
+/* ── Form Section ── */
+.form-section {
+  border-bottom: 1px solid var(--sf-border-subtle);
+  padding: 1.5rem 2rem;
+}
+.form-section:last-child {
+  border-bottom: none;
+}
+.form-section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--sf-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 1rem;
+}
+
+.form-header {
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--sf-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.form-footer {
+  padding: 1.5rem 2rem;
+  border-top: 1px solid var(--sf-border);
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  background: rgba(17, 24, 39, 0.4);
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  backdrop-filter: blur(10px);
+}

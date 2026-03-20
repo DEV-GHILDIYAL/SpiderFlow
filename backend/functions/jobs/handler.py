@@ -29,13 +29,26 @@ def lambda_handler(event, context):
         if http_method == "POST":
             body = json.loads(event.get("body") or "{}")
             return trigger_job(user_id, body)
-        elif http_method == "GET" and job_id:
-            return get_job(job_id)
+        elif http_method == "GET":
+            if job_id:
+                return get_job(job_id)
+            else:
+                return list_jobs(user_id)
         else:
             return build_response(405, {"error": "Method not allowed"})
     except Exception as e:
         print(f"Error: {e}")
         return build_response(500, {"error": "Internal server error"})
+
+
+def list_jobs(user_id: str):
+    """List all jobs for a user using UserJobsIndex GSI."""
+    response = jobs_table.query(
+        IndexName="UserJobsIndex",
+        KeyConditionExpression=Key("userId").eq(user_id),
+        ScanIndexForward=False,  # Newest first
+    )
+    return build_response(200, response.get("Items", []))
 
 
 def trigger_job(user_id: str, body: dict):
@@ -63,15 +76,19 @@ def trigger_job(user_id: str, body: dict):
     jobs_table.put_item(Item=job_item)
 
     # Publish message to SQS
-    sqs.send_message(
-        QueueUrl=QUEUE_URL,
-        MessageBody=json.dumps({
+    sqs_params = {
+        "QueueUrl": QUEUE_URL,
+        "MessageBody": json.dumps({
             "jobId": job_id,
             "sessionId": session_id,
             "userId": user_id,
-        }),
-        MessageGroupId=session_id if ".fifo" in QUEUE_URL else None,
-    )
+        })
+    }
+    
+    if ".fifo" in QUEUE_URL:
+        sqs_params["MessageGroupId"] = session_id
+        
+    sqs.send_message(**sqs_params)
 
     return build_response(201, job_item)
 

@@ -139,35 +139,48 @@ class ApiStack(cdk.Stack):
             "CognitoAuthorizer",
             cognito_user_pools=[user_pool],
         )
-        auth_options = apigw.MethodOptions(
-            authorizer=authorizer,
-            authorization_type=apigw.AuthorizationType.COGNITO,
-        )
-
         # /sessions
         sessions_resource = api.root.add_resource("sessions")
-        sessions_resource.add_method("GET", apigw.LambdaIntegration(sessions_fn), method_options=auth_options)
-        sessions_resource.add_method("POST", apigw.LambdaIntegration(sessions_fn), method_options=auth_options)
+        sessions_resource.add_method("GET", apigw.LambdaIntegration(sessions_fn),
+                                     authorizer=authorizer,
+                                     authorization_type=apigw.AuthorizationType.COGNITO)
+        sessions_resource.add_method("POST", apigw.LambdaIntegration(sessions_fn),
+                                     authorizer=authorizer,
+                                     authorization_type=apigw.AuthorizationType.COGNITO)
 
         session_item = sessions_resource.add_resource("{sessionId}")
-        session_item.add_method("GET", apigw.LambdaIntegration(sessions_fn), method_options=auth_options)
-        session_item.add_method("PUT", apigw.LambdaIntegration(sessions_fn), method_options=auth_options)
-        session_item.add_method("DELETE", apigw.LambdaIntegration(sessions_fn), method_options=auth_options)
+        session_item.add_method("GET", apigw.LambdaIntegration(sessions_fn),
+                                authorizer=authorizer,
+                                authorization_type=apigw.AuthorizationType.COGNITO)
+        session_item.add_method("PUT", apigw.LambdaIntegration(sessions_fn),
+                                authorizer=authorizer,
+                                authorization_type=apigw.AuthorizationType.COGNITO)
+        session_item.add_method("DELETE", apigw.LambdaIntegration(sessions_fn),
+                                authorizer=authorizer,
+                                authorization_type=apigw.AuthorizationType.COGNITO)
 
         # /jobs
         jobs_resource = api.root.add_resource("jobs")
-        jobs_resource.add_method("POST", apigw.LambdaIntegration(jobs_fn), method_options=auth_options)
+        jobs_resource.add_method("POST", apigw.LambdaIntegration(jobs_fn),
+                                 authorizer=authorizer,
+                                 authorization_type=apigw.AuthorizationType.COGNITO)
 
         job_item = jobs_resource.add_resource("{jobId}")
-        job_item.add_method("GET", apigw.LambdaIntegration(jobs_fn), method_options=auth_options)
+        job_item.add_method("GET", apigw.LambdaIntegration(jobs_fn),
+                            authorizer=authorizer,
+                            authorization_type=apigw.AuthorizationType.COGNITO)
 
         # /dashboard
         dashboard_resource = api.root.add_resource("dashboard")
-        dashboard_resource.add_method("GET", apigw.LambdaIntegration(dashboard_fn), method_options=auth_options)
+        dashboard_resource.add_method("GET", apigw.LambdaIntegration(dashboard_fn),
+                                      authorizer=authorizer,
+                                      authorization_type=apigw.AuthorizationType.COGNITO)
 
         # /export
         export_resource = api.root.add_resource("export")
-        export_resource.add_method("GET", apigw.LambdaIntegration(export_fn), method_options=auth_options)
+        export_resource.add_method("GET", apigw.LambdaIntegration(export_fn),
+                                   authorizer=authorizer,
+                                   authorization_type=apigw.AuthorizationType.COGNITO)
 
         # ── Outputs ──
         CfnOutput(self, "ApiUrl", value=api.url)

@@ -1,18 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { sessionsApi, exportApi, type Session, type ExportFile } from "@/lib/api";
+import { sessionsApi, jobsApi, exportApi, type Session, type ExportFile, type Job } from "@/lib/api";
 
-interface JobWithSession {
-  sessionId: string;
-  jobId: string;
-  userId: string;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-  pagesScraped: number;
-  itemsExtracted: number;
-  errors: string[];
+interface JobWithSession extends Job {
   sessionName?: string;
 }
 
@@ -27,11 +18,22 @@ export default function JobsPage() {
 
   async function loadJobs() {
     try {
-      // Load all sessions then aggregate their jobs
-      const sessions = await sessionsApi.list();
-      // For demo purposes, show a placeholder  
-      // In production, you'd have a dedicated /jobs endpoint or paginated listing
-      setJobs([]);
+      const [sessions, jobsData] = await Promise.all([
+        sessionsApi.list(),
+        jobsApi.list(),
+      ]);
+
+      const sessionMap = sessions.reduce((acc: Record<string, string>, s: Session) => {
+        acc[s.sessionId] = s.name;
+        return acc;
+      }, {} as Record<string, string>);
+
+      const jobsWithSessions: JobWithSession[] = jobsData.map((job: Job) => ({
+        ...job,
+        sessionName: sessionMap[job.sessionId] || "Unknown Session",
+      }));
+
+      setJobs(jobsWithSessions);
     } catch (err) {
       console.error("Failed to load jobs:", err);
     } finally {

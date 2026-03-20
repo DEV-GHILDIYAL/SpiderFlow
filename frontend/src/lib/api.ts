@@ -16,7 +16,12 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const authHeaders = await getAuthHeaders();
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const baseUrl = API_BASE_URL.endsWith("/")
+    ? API_BASE_URL.slice(0, -1)
+    : API_BASE_URL;
+  const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+
+  const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -88,6 +93,7 @@ export const jobsApi = {
       method: "POST",
       body: JSON.stringify({ sessionId }),
     }),
+  list: () => request<Job[]>("/jobs"),
   get: (jobId: string) => request<Job>(`/jobs/${jobId}`),
 };
 

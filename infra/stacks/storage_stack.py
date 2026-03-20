@@ -54,6 +54,17 @@ class StorageStack(cdk.Stack):
             ),
         )
 
+        # GSI to query jobs by userId
+        self.jobs_table.add_global_secondary_index(
+            index_name="UserJobsIndex",
+            partition_key=dynamodb.Attribute(
+                name="userId", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="createdAt", type=dynamodb.AttributeType.STRING
+            ),
+        )
+
         # ── Data Bucket (stores scraped results) ──
         self.data_bucket = s3.Bucket(
             self,

@@ -181,7 +181,6 @@ function CreateSessionForm({
     setSubmitting(true);
 
     try {
-      // Parse selectors from a simple key=value format
       const selectorMap: Record<string, string> = {};
       if (selectors.trim()) {
         selectors.split("\n").forEach((line) => {
@@ -210,98 +209,117 @@ function CreateSessionForm({
   }
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.65)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100,
-        backdropFilter: "blur(4px)",
-      }}
-      onClick={onClose}
-    >
-      <div
-        className="glass-card animate-fadeIn"
-        style={{ width: "100%", maxWidth: 560, padding: "2rem" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "1.5rem" }}>
-          Create New Session
-        </h2>
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+    <div className="slide-over-overlay" onClick={onClose}>
+      <div className="slide-over-panel" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="form-header">
           <div>
-            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.4rem", color: "var(--sf-text-muted)" }}>
-              Session Name
-            </label>
-            <input
-              className="input-field"
-              placeholder="e.g. Product Listings Scraper"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
+            <h2 style={{ fontSize: "1.25rem", fontWeight: 700, background: "linear-gradient(135deg, #fff 0%, #94a3b8 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+              New Scraping Session
+            </h2>
+            <p style={{ fontSize: "0.85rem", color: "var(--sf-text-muted)" }}>Configure your spider's target and rules.</p>
           </div>
-          <div>
-            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.4rem", color: "var(--sf-text-muted)" }}>
-              Target URL
-            </label>
-            <input
-              className="input-field"
-              type="url"
-              placeholder="https://example.com/products"
-              value={targetUrl}
-              onChange={(e) => setTargetUrl(e.target.value)}
-              required
-            />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.4rem", color: "var(--sf-text-muted)" }}>
-              CSS Selectors (one per line: field=selector)
-            </label>
-            <textarea
-              className="input-field"
-              placeholder={"title=h1::text\nprice=.price::text\ndescription=.desc::text"}
-              value={selectors}
-              onChange={(e) => setSelectors(e.target.value)}
-              rows={4}
-              style={{ resize: "vertical", fontFamily: "var(--font-geist-mono)" }}
-            />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.4rem", color: "var(--sf-text-muted)" }}>
-                Pagination Selector (optional)
-              </label>
-              <input
-                className="input-field"
-                placeholder="a.next-page"
-                value={paginationSelector}
-                onChange={(e) => setPaginationSelector(e.target.value)}
-              />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.4rem", color: "var(--sf-text-muted)" }}>
-                Max Pages
-              </label>
-              <input
-                className="input-field"
-                type="number"
-                min={1}
-                max={1000}
-                value={maxPages}
-                onChange={(e) => setMaxPages(e.target.value)}
-              />
+          <button 
+            type="button" 
+            onClick={onClose}
+            style={{ background: "none", border: "none", color: "var(--sf-text-muted)", cursor: "pointer", fontSize: "1.5rem" }}
+          >
+            &times;
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+          {/* Section: Basic Info */}
+          <div className="form-section">
+            <h3 className="form-section-title">Identify</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+                  Session Name
+                </label>
+                <input
+                  className="input-field"
+                  placeholder="e.g. E-commerce Product Scraper"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+                  Target URL
+                </label>
+                <input
+                  className="input-field"
+                  type="url"
+                  placeholder="https://example.com/shop"
+                  value={targetUrl}
+                  onChange={(e) => setTargetUrl(e.target.value)}
+                  required
+                />
+              </div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end", marginTop: "0.5rem" }}>
-            <button type="button" className="btn-secondary" onClick={onClose}>
+
+          {/* Section: Extraction Rules */}
+          <div className="form-section">
+            <h3 className="form-section-title">Extraction Rules</h3>
+            <div>
+              <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+                CSS Selectors <span style={{ fontWeight: 400, color: "var(--sf-text-muted)" }}>(field=selector)</span>
+              </label>
+              <textarea
+                className="input-field"
+                placeholder={"title=h1.product-title\nprice=.current-price\nimage=img.main-image::attr(src)"}
+                value={selectors}
+                onChange={(e) => setSelectors(e.target.value)}
+                rows={5}
+                style={{ resize: "vertical", fontFamily: "var(--font-geist-mono)", fontSize: "0.85rem" }}
+              />
+              <p style={{ fontSize: "0.75rem", color: "var(--sf-text-muted)", marginTop: "0.5rem" }}>
+                Add one rule per line. Use `::text` for content or `::attr(name)` for attributes.
+              </p>
+            </div>
+          </div>
+
+          {/* Section: Navigation */}
+          <div className="form-section">
+            <h3 className="form-section-title">Navigation</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: "1rem" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+                  Next Page Selector (optional)
+                </label>
+                <input
+                  className="input-field"
+                  placeholder="li.next > a"
+                  value={paginationSelector}
+                  onChange={(e) => setPaginationSelector(e.target.value)}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+                  Max Pages
+                </label>
+                <input
+                  className="input-field"
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={maxPages}
+                  onChange={(e) => setMaxPages(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="form-footer">
+            <button type="button" className="btn-secondary" onClick={onClose} style={{ padding: "0.6rem 1.25rem" }}>
               Cancel
             </button>
-            <button type="submit" className="btn-primary" disabled={submitting}>
-              {submitting ? "Creating..." : "Create Session"}
+            <button type="submit" className="btn-primary" disabled={submitting} style={{ padding: "0.6rem 2rem" }}>
+              {submitting ? "Deploying Spider..." : "Create Session"}
             </button>
           </div>
         </form>
