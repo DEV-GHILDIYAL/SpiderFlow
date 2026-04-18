@@ -113,15 +113,19 @@ class ApiStack(cdk.Stack):
                 os.path.join(os.path.dirname(__file__), "..", "..", "backend", "functions", "export")
             ),
             layers=[shared_layer],
-            environment=common_env,
+            environment={
+                **common_env,
+                "SCRAPED_DATA_BUCKET": data_bucket.bucket_name
+            },
             timeout=cdk.Duration.seconds(60),
             memory_size=512,
         )
-        data_bucket.grant_read(export_fn)
+        # Upgraded to read/write for CSV PUT uploads + GeneratePresignedUrl
+        data_bucket.grant_read_write(export_fn)
         jobs_table.grant_read_data(export_fn)
 
         # ── API Gateway ──
-        api = apigw.RestApi(
+        self.api = apigw.RestApi(
             self,
             "SpiderFlowApi",
             rest_api_name="SpiderFlow API",
@@ -140,7 +144,7 @@ class ApiStack(cdk.Stack):
             cognito_user_pools=[user_pool],
         )
         # /sessions
-        sessions_resource = api.root.add_resource("sessions")
+        sessions_resource = self.api.root.add_resource("sessions")
         sessions_resource.add_method("GET", apigw.LambdaIntegration(sessions_fn),
                                      authorizer=authorizer,
                                      authorization_type=apigw.AuthorizationType.COGNITO)
@@ -160,7 +164,7 @@ class ApiStack(cdk.Stack):
                                 authorization_type=apigw.AuthorizationType.COGNITO)
 
         # /jobs
-        jobs_resource = api.root.add_resource("jobs")
+        jobs_resource = self.api.root.add_resource("jobs")
         jobs_resource.add_method("POST", apigw.LambdaIntegration(jobs_fn),
                                  authorizer=authorizer,
                                  authorization_type=apigw.AuthorizationType.COGNITO)
@@ -171,16 +175,16 @@ class ApiStack(cdk.Stack):
                             authorization_type=apigw.AuthorizationType.COGNITO)
 
         # /dashboard
-        dashboard_resource = api.root.add_resource("dashboard")
+        dashboard_resource = self.api.root.add_resource("dashboard")
         dashboard_resource.add_method("GET", apigw.LambdaIntegration(dashboard_fn),
                                       authorizer=authorizer,
                                       authorization_type=apigw.AuthorizationType.COGNITO)
 
         # /export
-        export_resource = api.root.add_resource("export")
+        export_resource = self.api.root.add_resource("export")
         export_resource.add_method("GET", apigw.LambdaIntegration(export_fn),
                                    authorizer=authorizer,
                                    authorization_type=apigw.AuthorizationType.COGNITO)
 
         # ── Outputs ──
-        CfnOutput(self, "ApiUrl", value=api.url)
+        CfnOutput(self, "ApiUrl", value=self.api.url)

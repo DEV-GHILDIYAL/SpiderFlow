@@ -1,70 +1,151 @@
 """Export Lambda Handler – Generate presigned download URLs for scraped data."""
 import os
-
+import json
+import csv
+import io
+from datetime import datetime
 import boto3
-from boto3.dynamodb.conditions import Key
 
 from shared.utils import build_response, get_user_id
 
 s3 = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
-jobs_table = dynamodb.Table(os.environ["JOBS_TABLE"])
-DATA_BUCKET = os.environ["DATA_BUCKET"]
+
+# Extract environment resources
+JOBS_TABLE = os.environ.get("JOBS_TABLE")
+# Core requirement: Fetch bucket name from explicitly named variable
+DATA_BUCKET = os.environ.get("SCRAPED_DATA_BUCKET")
+
+
+def flatten_dict(d, parent_key='', sep='_'):
+    """
+    Flatten nested dictionary up to 2 levels.
+    e.g. {"price": {"value": 10}} becomes {"price_value": 10}
+    """
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            # Nested dictionary level 2 extraction
+            for sub_k, sub_v in v.items():
+                items.append((f"{new_key}{sep}{sub_k}", sub_v))
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
 
 def lambda_handler(event, context):
-    """Generate a presigned URL for downloading scraped data."""
+    """Generate a presigned URL for downloading scraped data in CSV or JSON."""
     try:
         user_id = get_user_id(event)
     except ValueError as e:
         return build_response(401, {"error": str(e)})
 
+    # 1. Accept GET request query parameters
     query_params = event.get("queryStringParameters") or {}
     job_id = query_params.get("jobId")
     session_id = query_params.get("sessionId")
+    req_format = query_params.get("format", "csv").lower()
 
     if not job_id or not session_id:
-        return build_response(400, {"error": "jobId and sessionId query parameters are required"})
+        return build_response(400, {"error": "Missing required parameters"})
+
+    # 2. Key pattern to retrieve JSON output 
+    raw_key = f"results/{session_id}/{job_id}/output.json"
 
     try:
-        # Verify job exists and belongs to user
-        job_resp = jobs_table.get_item(
-            Key={"sessionId": session_id, "jobId": job_id}
-        )
-        job = job_resp.get("Item")
-        if not job:
-            return build_response(404, {"error": "Job not found"})
-        if job.get("userId") != user_id:
-            return build_response(403, {"error": "Access denied"})
-
-        # List files for this job
-        prefix = f"users/{user_id}/sessions/{session_id}/jobs/{job_id}/"
-        response = s3.list_objects_v2(Bucket=DATA_BUCKET, Prefix=prefix)
-        files = response.get("Contents", [])
-
-        if not files:
-            return build_response(404, {"error": "No data files found for this job"})
-
-        # Generate presigned URLs for each file
-        download_links = []
-        for file_obj in files:
-            key = file_obj["Key"]
-            url = s3.generate_presigned_url(
+        if req_format == "json":
+            # 3. Direct pre-signed URL to raw JSON
+            try:
+                s3.head_object(Bucket=DATA_BUCKET, Key=raw_key)
+            except s3.exceptions.ClientError as e:
+                # Validate File Not Found explicitly
+                if e.response['Error']['Code'] == '404':
+                    return build_response(404, {"error": "Job results not found"})
+                raise
+                
+            presigned_url = s3.generate_presigned_url(
                 "get_object",
-                Params={"Bucket": DATA_BUCKET, "Key": key},
-                ExpiresIn=3600,  # 1 hour
+                Params={"Bucket": DATA_BUCKET, "Key": raw_key},
+                ExpiresIn=3600  # URL expires in 1 hour
             )
-            download_links.append({
-                "filename": key.split("/")[-1],
-                "size": file_obj["Size"],
-                "url": url,
+
+            # 5. Return success json shape
+            return build_response(200, {
+                "downloadUrl": presigned_url,
+                "format": "json",
+                "jobId": job_id,
+                "generatedAt": datetime.utcnow().isoformat() + "Z"
             })
 
-        return build_response(200, {
-            "jobId": job_id,
-            "files": download_links,
-        })
+        elif req_format == "csv":
+            # 4. CSV Conversion Process
+            try:
+                # Read entire JSON array directly from S3
+                response = s3.get_object(Bucket=DATA_BUCKET, Key=raw_key)
+                file_content = response["Body"].read().decode("utf-8")
+                
+                # Check serialization format (array or lines)
+                try:
+                    data = json.loads(file_content)
+                except json.JSONDecodeError:
+                    data = [json.loads(line) for line in file_content.strip().split('\n') if line]
+
+                if not data:
+                    return build_response(404, {"error": "Job results are empty"})
+                
+                if not isinstance(data, list):
+                    data = [data]
+
+                # Flatten nested fields dynamically
+                flattened_data = [flatten_dict(item) for item in data]
+                
+                # Identify diverse header columns mapping everything found
+                headers = set()
+                for item in flattened_data:
+                    headers.update(item.keys())
+                headers = sorted(list(headers))
+
+                # Output into CSV natively
+                output = io.StringIO()
+                writer = csv.DictWriter(output, fieldnames=headers)
+                writer.writeheader()
+                for row in flattened_data:
+                    writer.writerow(row)
+                
+                csv_content = output.getvalue()
+                output.close()
+
+                # Upload generated CSV map
+                csv_key = f"exports/{session_id}/{job_id}/output.csv"
+                s3.put_object(
+                    Bucket=DATA_BUCKET,
+                    Key=csv_key,
+                    Body=csv_content,
+                    ContentType="text/csv"
+                )
+
+                # Return URL pointing securely to CSV path
+                presigned_url = s3.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": DATA_BUCKET, "Key": csv_key},
+                    ExpiresIn=3600
+                )
+
+                return build_response(200, {
+                    "downloadUrl": presigned_url,
+                    "format": "csv",
+                    "jobId": job_id,
+                    "generatedAt": datetime.utcnow().isoformat() + "Z"
+                })
+
+            except s3.exceptions.NoSuchKey:
+                return build_response(404, {"error": "Job results not found"})
+
+        else:
+            return build_response(400, {"error": "Invalid format requested. Valid options: 'csv' or 'json'"})
 
     except Exception as e:
-        print(f"Export error: {e}")
-        return build_response(500, {"error": "Internal server error"})
+        # 6. Global exception catching & CloudWatch visibility
+        print(f"Export Handler Error: {str(e)}")
+        return build_response(500, {"error": "Internal server error processing the export request"})

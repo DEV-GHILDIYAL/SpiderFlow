@@ -14,6 +14,7 @@ from spiderflow.spiders.generic_spider import GenericSpider
 sqs = boto3.client("sqs")
 dynamodb = boto3.resource("dynamodb")
 QUEUE_URL = os.environ["JOB_QUEUE_URL"]
+DLQ_URL = os.environ.get("DLQ_URL", "")
 JOBS_TABLE = os.environ["JOBS_TABLE"]
 jobs_table = dynamodb.Table(JOBS_TABLE)
 
@@ -47,22 +48,47 @@ def update_job_status(session_id: str, job_id: str, status: str, **extra):
         ExpressionAttributeValues=expr_values,
         ExpressionAttributeNames=expr_names,
     )
+    print(f"[STATUS] Job {job_id} is now '{status}'.")
+
+
+def send_to_dlq(message, reason):
+    """Sends the original SQS message directly to the Dead Letter Queue."""
+    if not DLQ_URL:
+        print("[WARNING] DLQ_URL is not set. Cannot send failed message to DLQ.")
+        return
+
+    try:
+        body = json.loads(message["Body"])
+        # Add metadata fields as requested
+        body["dlqReason"] = reason
+        body["dlqTimestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        
+        sqs.send_message(
+            QueueUrl=DLQ_URL,
+            MessageBody=json.dumps(body)
+        )
+        print("[DLQ] Successfully sent failed job message to Dead Letter Queue.")
+    except Exception as e:
+        print(f"[DLQ] Failed to send message to DLQ: {e}")
 
 
 def process_message(message):
     """Process a single SQS message by running a Scrapy crawl."""
-    body = json.loads(message["Body"])
-    job_id = body["jobId"]
-    session_id = body["sessionId"]
-    user_id = body["userId"]
-
-    print(f"Processing job {job_id} for session {session_id}")
-
-    # Update status to running
-    update_job_status(session_id, job_id, "running")
-
+    job_id = None
+    session_id = None
+    
     try:
-        # Load session config from DynamoDB
+        body = json.loads(message["Body"])
+        job_id = body["jobId"]
+        session_id = body["sessionId"]
+        user_id = body["userId"]
+
+        print(f"Processing job {job_id} for session {session_id}")
+
+        # 1. Update status to running before Scrapy crawl
+        update_job_status(session_id, job_id, "running")
+
+        # Load session config from DynamoDB to pass to GenericSpider
         sessions_table = dynamodb.Table(os.environ.get("SESSIONS_TABLE", "SpiderFlowSessions"))
         session_resp = sessions_table.get_item(Key={"userId": user_id, "sessionId": session_id})
         session_config = session_resp.get("Item", {})
@@ -72,8 +98,7 @@ def process_message(message):
         pagination = session_config.get("pagination", {})
 
         if not target_url:
-            update_job_status(session_id, job_id, "failed", errors=["No target URL configured"])
-            return
+            raise ValueError("No target URL configured in the session")
 
         # Run Scrapy spider
         settings = get_project_settings()
@@ -94,12 +119,28 @@ def process_message(message):
         )
         process.start(stop_after_crawl=True)
 
-        update_job_status(session_id, job_id, "completed")
-        print(f"Job {job_id} completed successfully")
+        # 2. Update status to completed and add completedAt timestamp
+        completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        update_job_status(session_id, job_id, "completed", completedAt=completed_at)
+        print(f"Job {job_id} crawl finished successfully")
 
     except Exception as e:
-        print(f"Job {job_id} failed: {e}")
-        update_job_status(session_id, job_id, "failed", errors=[str(e)])
+        # 3. Update status to failed, save errorMessage, and send to DLQ
+        error_msg = str(e)
+        if session_id and job_id:
+            print(f"Job {job_id} threw an exception: {error_msg}")
+            update_job_status(session_id, job_id, "failed", errorMessage=error_msg)
+            # Call DLQ handler
+            send_to_dlq(message, error_msg)
+        else:
+            print(f"Failed to process unparseable message: {error_msg}")
+            # Ensure it ends up in DLQ even if parse completely failed
+            send_to_dlq(message, error_msg)
+            
+    finally:
+        # Cleanup log for the try/except/finally block requirement
+        if job_id:
+            print(f"Finished processing execution cycle for job: {job_id}")
 
 
 def main():
@@ -122,14 +163,14 @@ def main():
             for message in messages:
                 process_message(message)
 
-                # Delete message after successful processing
+                # Delete message after execution attempt finishes
                 sqs.delete_message(
                     QueueUrl=QUEUE_URL,
                     ReceiptHandle=message["ReceiptHandle"],
                 )
 
         except Exception as e:
-            print(f"Consumer error: {e}")
+            print(f"Consumer SQS polling error: {e}")
             time.sleep(5)
 
     print("Worker shut down.")

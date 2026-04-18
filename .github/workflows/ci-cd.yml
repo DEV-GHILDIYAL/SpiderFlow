@@ -107,4 +107,3 @@ jobs:
           npm ci
           npm run build
           aws s3 sync out/ s3://${{ secrets.FRONTEND_BUCKET_NAME }} --delete
-          aws cloudfront create-invalidation --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
