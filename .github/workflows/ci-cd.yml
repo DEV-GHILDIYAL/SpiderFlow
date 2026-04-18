@@ -54,7 +54,16 @@ jobs:
 
       # Build and deploy frontend
       - run: |
+          # Fetch dynamic variables securely from your initialized CloudFormation Stacks
+          POOL_ID=$(aws cloudformation describe-stacks --region us-east-1 --stack-name SpiderFlowCognito --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text)
+          CLIENT_ID=$(aws cloudformation describe-stacks --region us-east-1 --stack-name SpiderFlowCognito --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue" --output text)
+          API_URL=$(aws cloudformation describe-stacks --region us-east-1 --stack-name SpiderFlowApi --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
+          
           cd frontend
+          echo "NEXT_PUBLIC_USER_POOL_ID=$POOL_ID" >> .env.production
+          echo "NEXT_PUBLIC_USER_POOL_CLIENT_ID=$CLIENT_ID" >> .env.production
+          echo "NEXT_PUBLIC_API_URL=$API_URL" >> .env.production
+          
           npm ci
           npm run build
           aws s3 sync out/ s3://${{ secrets.FRONTEND_BUCKET_NAME }} --delete
