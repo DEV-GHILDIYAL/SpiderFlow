@@ -136,7 +136,7 @@ export default function AuthPage() {
           )}
 
           {(mode === "login" || mode === "register" || mode === "reset-password") && (
-            <div style={{ position: "relative" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
               <input
                 className="input-field"
                 type="password"
@@ -154,14 +154,13 @@ export default function AuthPage() {
                     clearError();
                   }}
                   style={{
-                    position: "absolute",
-                    right: 0,
-                    top: "-22px",
+                    alignSelf: "flex-end",
                     background: "none",
                     border: "none",
                     color: "var(--sf-accent)",
                     fontSize: "0.8rem",
                     cursor: "pointer",
+                    fontWeight: 500,
                   }}
                 >
                   Forgot password?
