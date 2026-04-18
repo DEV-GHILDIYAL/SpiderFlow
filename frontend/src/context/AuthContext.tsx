@@ -12,6 +12,8 @@ import {
   signUp,
   signOut,
   confirmSignUp,
+  resetPassword,
+  confirmResetPassword,
   getCurrentUser,
   type SignInInput,
   type SignUpInput,
@@ -30,6 +32,8 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   confirmRegistration: (email: string, code: string) => Promise<void>;
+  forgotPassword: (email: string) => Promise<void>;
+  submitForgotPassword: (email: string, code: string, newPassword: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -100,6 +104,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function forgotPassword(email: string) {
+    setError(null);
+    try {
+      await resetPassword({ username: email });
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Password reset request failed";
+      setError(message);
+      throw err;
+    }
+  }
+
+  async function submitForgotPassword(email: string, code: string, newPassword: string) {
+    setError(null);
+    try {
+      await confirmResetPassword({ username: email, confirmationCode: code, newPassword });
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Password reset confirmation failed";
+      setError(message);
+      throw err;
+    }
+  }
+
   async function logout() {
     await signOut();
     setUser(null);
@@ -118,6 +146,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         register,
         confirmRegistration,
+        forgotPassword,
+        submitForgotPassword,
         logout,
         clearError,
       }}

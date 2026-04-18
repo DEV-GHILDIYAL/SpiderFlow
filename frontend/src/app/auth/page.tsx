@@ -4,10 +4,10 @@ import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 
-type AuthMode = "login" | "register" | "confirm";
+type AuthMode = "login" | "register" | "confirm" | "forgot-password" | "reset-password";
 
 export default function AuthPage() {
-  const { login, register, confirmRegistration, error, clearError } = useAuth();
+  const { login, register, confirmRegistration, forgotPassword, submitForgotPassword, error, clearError } = useAuth();
   const router = useRouter();
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
@@ -30,6 +30,13 @@ export default function AuthPage() {
         setMode("confirm");
       } else if (mode === "confirm") {
         await confirmRegistration(email, confirmCode);
+        await login(email, password);
+        router.push("/dashboard");
+      } else if (mode === "forgot-password") {
+        await forgotPassword(email);
+        setMode("reset-password");
+      } else if (mode === "reset-password") {
+        await submitForgotPassword(email, confirmCode, password);
         await login(email, password);
         router.push("/dashboard");
       }
@@ -83,6 +90,10 @@ export default function AuthPage() {
             ? "Sign in to your account"
             : mode === "register"
             ? "Create a new account"
+            : mode === "forgot-password"
+            ? "Reset your password"
+            : mode === "reset-password"
+            ? "Create new password"
             : "Verify your email"}
         </p>
 
@@ -114,29 +125,53 @@ export default function AuthPage() {
             />
           )}
 
-          {mode !== "confirm" && (
-            <>
-              <input
-                className="input-field"
-                type="email"
-                placeholder="Email address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
+          {(mode === "login" || mode === "register" || mode === "forgot-password") && (
+            <input
+              className="input-field"
+              type="email"
+              placeholder="Email address"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          )}
+
+          {(mode === "login" || mode === "register" || mode === "reset-password") && (
+            <div style={{ position: "relative" }}>
               <input
                 className="input-field"
                 type="password"
-                placeholder="Password"
+                placeholder={mode === "reset-password" ? "New Password" : "Password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={8}
               />
-            </>
+              {mode === "login" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("forgot-password");
+                    clearError();
+                  }}
+                  style={{
+                    position: "absolute",
+                    right: 0,
+                    top: "-22px",
+                    background: "none",
+                    border: "none",
+                    color: "var(--sf-accent)",
+                    fontSize: "0.8rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  Forgot password?
+                </button>
+              )}
+            </div>
           )}
 
-          {mode === "confirm" && (
+          {(mode === "confirm" || mode === "reset-password") && (
             <input
               className="input-field"
               type="text"
@@ -157,6 +192,10 @@ export default function AuthPage() {
               "Sign In"
             ) : mode === "register" ? (
               "Create Account"
+            ) : mode === "forgot-password" ? (
+              "Send Reset Code"
+            ) : mode === "reset-password" ? (
+              "Reset Password & Sign In"
             ) : (
               "Verify & Sign In"
             )}
@@ -175,6 +214,7 @@ export default function AuthPage() {
             <>
               Don&apos;t have an account?{" "}
               <button
+                type="button"
                 onClick={() => {
                   setMode("register");
                   clearError();
@@ -194,6 +234,7 @@ export default function AuthPage() {
             <>
               Already have an account?{" "}
               <button
+                type="button"
                 onClick={() => {
                   setMode("login");
                   clearError();
@@ -207,6 +248,26 @@ export default function AuthPage() {
                 }}
               >
                 Sign In
+              </button>
+            </>
+          ) : (mode === "forgot-password" || mode === "reset-password") ? (
+            <>
+              Remember your password?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("login");
+                  clearError();
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--sf-accent)",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Back to Sign In
               </button>
             </>
           ) : null}
