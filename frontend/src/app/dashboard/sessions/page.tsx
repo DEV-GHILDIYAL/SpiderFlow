@@ -94,17 +94,20 @@ export default function SessionsPage() {
         <div
           className="glass-card"
           style={{
-            padding: "3rem",
+            padding: "3.5rem 2rem",
             textAlign: "center",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
           }}
         >
-          <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🕷️</div>
-          <h3 style={{ fontSize: "1.2rem", marginBottom: "0.5rem" }}>No sessions yet</h3>
-          <p style={{ color: "var(--sf-text-muted)", marginBottom: "1.5rem" }}>
-            Create your first scraping session to get started.
+          <div style={{ fontSize: "3.5rem", marginBottom: "1.5rem", opacity: 0.8 }}>🕷️</div>
+          <h3 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "0.5rem" }}>No sessions yet</h3>
+          <p style={{ color: "var(--sf-text-muted)", marginBottom: "2rem", maxWidth: "400px" }}>
+            Create your first scraping session to configure target websites and data extraction rules.
           </p>
           <button className="btn-primary" onClick={() => setShowCreate(true)}>
-            Create Session
+            + Create Session
           </button>
         </div>
       ) : (
@@ -209,20 +212,20 @@ function CreateSessionForm({
   }
 
   return (
-    <div className="slide-over-overlay" onClick={onClose}>
-      <div className="slide-over-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="form-header">
           <div>
-            <h2 style={{ fontSize: "1.25rem", fontWeight: 700, background: "linear-gradient(135deg, #fff 0%, #94a3b8 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--sf-text)" }}>
               New Scraping Session
             </h2>
-            <p style={{ fontSize: "0.85rem", color: "var(--sf-text-muted)" }}>Configure your spider's target and rules.</p>
+            <p style={{ fontSize: "0.85rem", color: "var(--sf-text-muted)", marginTop: "0.2rem" }}>Configure your spider's target and rules.</p>
           </div>
           <button 
             type="button" 
             onClick={onClose}
-            style={{ background: "none", border: "none", color: "var(--sf-text-muted)", cursor: "pointer", fontSize: "1.5rem" }}
+            style={{ background: "none", border: "none", color: "var(--sf-text-muted)", cursor: "pointer", fontSize: "1.5rem", padding: "0.2rem" }}
           >
             &times;
           </button>

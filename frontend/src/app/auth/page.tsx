@@ -55,8 +55,7 @@ export default function AuthPage() {
         alignItems: "center",
         justifyContent: "center",
         padding: "2rem",
-        background:
-          "radial-gradient(ellipse at 50% 30%, rgba(99,102,241,0.1) 0%, transparent 60%)",
+        background: "var(--sf-bg)",
       }}
     >
       <div
@@ -68,12 +67,12 @@ export default function AuthPage() {
         }}
       >
         <h1
-          className="gradient-text"
           style={{
             fontSize: "1.8rem",
             fontWeight: 800,
             textAlign: "center",
             marginBottom: "0.5rem",
+            color: "var(--sf-accent)"
           }}
         >
           SpiderFlow
