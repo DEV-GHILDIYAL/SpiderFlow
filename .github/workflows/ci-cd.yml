@@ -27,16 +27,9 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-  # ── Worker Docker Build ──
-  worker-build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t spiderflow-worker ./worker
-
   # ── Deploy (only on main branch push) ──
   deploy:
-    needs: [frontend-build, worker-build]
+    needs: [frontend-build]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
@@ -58,14 +51,6 @@ jobs:
       - run: pip install -r infra/requirements.txt
       - run: cdk deploy --all --require-approval never
         working-directory: infra
-
-      # Build and push worker Docker image
-      - uses: aws-actions/amazon-ecr-login@v2
-        id: ecr-login
-      - run: |
-          docker build -t spiderflow-worker ./worker
-          docker tag spiderflow-worker:latest ${{ steps.ecr-login.outputs.registry }}/spiderflow-worker:latest
-          docker push ${{ steps.ecr-login.outputs.registry }}/spiderflow-worker:latest
 
       # Build and deploy frontend
       - run: |
