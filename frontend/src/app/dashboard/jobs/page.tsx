@@ -16,11 +16,23 @@ export default function JobsPage() {
     loadJobs();
   }, []);
 
+  // Polling for live updates
+  useEffect(() => {
+    const activeJobs = jobs.filter(j => j.status === "queued" || j.status === "running");
+    
+    if (activeJobs.length > 0) {
+      const interval = setInterval(() => {
+        loadJobs();
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [jobs]);
+
   async function loadJobs() {
     try {
       const [sessions, jobsData] = await Promise.all([
-        sessionsApi.list(),
-        jobsApi.list(),
+        sessionsApi.list().catch(() => []),
+        jobsApi.list().catch(() => []),
       ]);
 
       const sessionMap = sessions.reduce((acc: Record<string, string>, s: Session) => {

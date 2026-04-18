@@ -165,6 +165,9 @@ class ApiStack(cdk.Stack):
 
         # /jobs
         jobs_resource = self.api.root.add_resource("jobs")
+        jobs_resource.add_method("GET", apigw.LambdaIntegration(jobs_fn),
+                                 authorizer=authorizer,
+                                 authorization_type=apigw.AuthorizationType.COGNITO)
         jobs_resource.add_method("POST", apigw.LambdaIntegration(jobs_fn),
                                  authorizer=authorizer,
                                  authorization_type=apigw.AuthorizationType.COGNITO)

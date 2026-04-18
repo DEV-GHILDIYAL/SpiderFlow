@@ -63,22 +63,34 @@ class JobStatusPipeline:
         self.items_count = 0
 
     def process_item(self, item, spider):
-        """Increment item counter."""
+        """Increment item counter and update progress periodically."""
         self.items_count += 1
+        
+        # Live update every 25 items
+        if self.items_count % 25 == 0:
+            self._update_db(spider)
+            
         return item
 
     def close_spider(self, spider):
         """Update final job metrics."""
+        self._update_db(spider)
+
+    def _update_db(self, spider):
+        """Perform the DynamoDB update for live status."""
         session_id = getattr(spider, "session_id", "")
         job_id = getattr(spider, "job_id", "")
 
         if session_id and job_id:
-            self.jobs_table.update_item(
-                Key={"sessionId": session_id, "jobId": job_id},
-                UpdateExpression="SET pagesScraped = :p, itemsExtracted = :i, updatedAt = :u",
-                ExpressionAttributeValues={
-                    ":p": getattr(spider, "pages_scraped", 0),
-                    ":i": self.items_count,
-                    ":u": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                },
-            )
+            try:
+                self.jobs_table.update_item(
+                    Key={"sessionId": session_id, "jobId": job_id},
+                    UpdateExpression="SET pagesScraped = :p, itemsExtracted = :i, updatedAt = :u",
+                    ExpressionAttributeValues={
+                        ":p": getattr(spider, "pages_scraped", 0),
+                        ":i": self.items_count,
+                        ":u": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    },
+                )
+            except Exception as e:
+                spider.logger.error(f"Failed to update live progress in DynamoDB: {e}")
