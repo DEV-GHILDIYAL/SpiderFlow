@@ -5,6 +5,10 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { roomsApi, jobsApi, type Room, type Job } from "@/lib/api";
 
+export function generateStaticParams() {
+  return [{ roomId: "id" }];
+}
+
 export default function RoomOverviewPage() {
   const { roomId } = useParams() as { roomId: string };
   const router = useRouter();
