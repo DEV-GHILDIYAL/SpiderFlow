@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { dashboardApi, type DashboardMetrics } from "@/lib/api";
 
 export default function DashboardPage() {
@@ -94,12 +95,12 @@ export default function DashboardPage() {
           Quick Actions
         </h2>
         <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-          <a href="/dashboard/sessions" className="btn-primary" style={{ textDecoration: "none" }}>
+          <Link href="/dashboard/sessions/new" className="btn-primary" style={{ textDecoration: "none" }}>
             + New Session
-          </a>
-          <a href="/dashboard/jobs" className="btn-secondary" style={{ textDecoration: "none" }}>
+          </Link>
+          <Link href="/dashboard/jobs" className="btn-secondary" style={{ textDecoration: "none" }}>
             View All Jobs
-          </a>
+          </Link>
         </div>
       </div>
     </div>

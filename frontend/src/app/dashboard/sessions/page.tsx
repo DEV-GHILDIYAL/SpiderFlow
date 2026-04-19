@@ -129,8 +129,8 @@ export default function SessionsPage() {
                   </button>
                   <button
                     className="btn-secondary"
-                    style={{ padding: "0.4rem 1rem", fontSize: "0.8rem" }}
-                    onClick={() => router.push(`/dashboard/sessions/${session.sessionId}`)}
+                    style={{ padding: "0.4rem 1rem", fontSize: "0.8rem", opacity: 0.6, cursor: "not-allowed" }}
+                    onClick={() => alert("Edit session feature is coming soon!")}
                   >
                     Edit
                   </button>

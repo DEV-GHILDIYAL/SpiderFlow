@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { sessionsApi, jobsApi, exportApi, type Session, type ExportFile, type Job } from "@/lib/api";
 
 interface JobWithSession extends Job {
@@ -123,9 +124,9 @@ export default function JobsPage() {
           <p style={{ color: "var(--sf-text-muted)", marginBottom: "1.5rem" }}>
             Trigger a job from the Sessions page to start scraping.
           </p>
-          <a href="/dashboard/sessions" className="btn-primary" style={{ textDecoration: "none" }}>
+          <Link href="/dashboard/sessions" className="btn-primary" style={{ textDecoration: "none" }}>
             Go to Sessions
-          </a>
+          </Link>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>

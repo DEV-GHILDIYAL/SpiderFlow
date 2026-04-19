@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function Home() {
   const { user } = useAuth();
@@ -61,29 +62,29 @@ export default function Home() {
 
         <div style={{ display: "flex", gap: "1rem", justifyContent: "center" }}>
           {user ? (
-            <button
+            <Link
+              href="/dashboard"
               className="btn-primary"
-              onClick={() => router.push("/dashboard")}
-              style={{ fontSize: "1rem", padding: "0.85rem 2.2rem" }}
+              style={{ fontSize: "1rem", padding: "0.85rem 2.2rem", textDecoration: "none" }}
             >
               Go to Dashboard →
-            </button>
+            </Link>
           ) : (
             <>
-              <button
+              <Link
+                href="/auth"
                 className="btn-primary"
-                onClick={() => router.push("/auth")}
-                style={{ fontSize: "1rem", padding: "0.85rem 2.2rem" }}
+                style={{ fontSize: "1rem", padding: "0.85rem 2.2rem", textDecoration: "none" }}
               >
                 Get Started
-              </button>
-              <button
+              </Link>
+              <Link
+                href="/auth"
                 className="btn-secondary"
-                onClick={() => router.push("/auth")}
-                style={{ fontSize: "1rem", padding: "0.85rem 2.2rem" }}
+                style={{ fontSize: "1rem", padding: "0.85rem 2.2rem", textDecoration: "none" }}
               >
                 Sign In
-              </button>
+              </Link>
             </>
           )}
         </div>
