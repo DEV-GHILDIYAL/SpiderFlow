@@ -16,7 +16,9 @@ dynamodb = boto3.resource("dynamodb")
 QUEUE_URL = os.environ["JOB_QUEUE_URL"]
 DLQ_URL = os.environ.get("DLQ_URL", "")
 JOBS_TABLE = os.environ["JOBS_TABLE"]
+USERS_TABLE = os.environ.get("USERS_TABLE", "SpiderFlowUsers")
 jobs_table = dynamodb.Table(JOBS_TABLE)
+users_table = dynamodb.Table(USERS_TABLE)
 
 running = True
 
@@ -72,10 +74,24 @@ def send_to_dlq(message, reason):
         print(f"[DLQ] Failed to send message to DLQ: {e}")
 
 
+def finalize_job_usage(user_id: str, pages_count: int):
+    """Increment the user's monthly page count."""
+    try:
+        users_table.update_item(
+            Key={"userId": user_id},
+            UpdateExpression="SET pagesScrapedThisMonth = pagesScrapedThisMonth + :p",
+            ExpressionAttributeValues={":p": pages_count}
+        )
+        print(f"[USAGE] Incremented {user_id} monthly pages by {pages_count}")
+    except Exception as e:
+        print(f"[ERROR] Failed to update usage for {user_id}: {e}")
+
+
 def process_message(message):
     """Process a single SQS message by running a Scrapy crawl."""
     job_id = None
     session_id = None
+    user_id = None
     
     try:
         body = json.loads(message["Body"])
@@ -88,7 +104,7 @@ def process_message(message):
         # 1. Update status to running before Scrapy crawl
         update_job_status(session_id, job_id, "running")
 
-        # Load session config from DynamoDB to pass to GenericSpider
+        # Load session config
         sessions_table = dynamodb.Table(os.environ.get("SESSIONS_TABLE", "SpiderFlowSessions"))
         session_resp = sessions_table.get_item(Key={"userId": user_id, "sessionId": session_id})
         session_config = session_resp.get("Item", {})
@@ -96,6 +112,8 @@ def process_message(message):
         target_url = session_config.get("targetUrl", "")
         selectors = session_config.get("selectors", {})
         pagination = session_config.get("pagination", {})
+        # New parameter: scraping_provider
+        scraping_provider = session_config.get("scraping_provider", "internal")
 
         if not target_url:
             raise ValueError("No target URL configured in the session")
@@ -108,21 +126,33 @@ def process_message(message):
         settings.set("SPIDERFLOW_USER_ID", user_id)
 
         process = CrawlerProcess(settings)
-        process.crawl(
-            GenericSpider,
-            start_url=target_url,
-            selectors=selectors,
-            pagination=pagination,
-            job_id=job_id,
-            session_id=session_id,
-            user_id=user_id,
-        )
+        spider_kwargs = {
+            "start_url": target_url,
+            "selectors": selectors,
+            "pagination": pagination,
+            "job_id": job_id,
+            "session_id": session_id,
+            "user_id": user_id,
+            "scraping_provider": scraping_provider
+        }
+        
+        process.crawl(GenericSpider, **spider_kwargs)
         process.start(stop_after_crawl=True)
 
-        # 2. Update status to completed and add completedAt timestamp
+        # 2a. Fetch final stats (pages scraped) from DynamoDB job record
+        # (GenericSpider updates this field during the crawl via pipeline)
+        job_resp = jobs_table.get_item(Key={"sessionId": session_id, "jobId": job_id})
+        job_item = job_resp.get("Item", {})
+        pages_count = job_item.get("pagesScraped", 0)
+
+        # 2b. Update status to completed
         completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         update_job_status(session_id, job_id, "completed", completedAt=completed_at)
-        print(f"Job {job_id} crawl finished successfully")
+        
+        # 2c. Finalize user usage tracking
+        finalize_job_usage(user_id, pages_count)
+        
+        print(f"Job {job_id} crawl finished successfully. Total pages: {pages_count}")
 
     except Exception as e:
         # 3. Update status to failed, save errorMessage, and send to DLQ

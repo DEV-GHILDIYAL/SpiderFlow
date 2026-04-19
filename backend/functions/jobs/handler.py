@@ -10,8 +10,17 @@ from shared.utils import build_response, get_user_id, now_iso
 
 dynamodb = boto3.resource("dynamodb")
 jobs_table = dynamodb.Table(os.environ["JOBS_TABLE"])
+users_table = dynamodb.Table(os.environ["USERS_TABLE"])
 sqs = boto3.client("sqs")
 QUEUE_URL = os.environ["JOB_QUEUE_URL"]
+
+# Plan Limits
+PLAN_LIMITS = {
+    "trial": 10,
+    "starter": 100,
+    "pro": 1000,
+    "enterprise": float('inf')
+}
 
 
 def lambda_handler(event, context):
@@ -52,7 +61,33 @@ def list_jobs(user_id: str):
 
 
 def trigger_job(user_id: str, body: dict):
-    """Create a new scraping job and publish to SQS."""
+    """Create a new scraping job after enforcing quotas."""
+    # 1. Fetch user record for quota check
+    user_resp = users_table.get_item(Key={"userId": user_id})
+    user = user_resp.get("Item")
+    
+    if not user:
+        return build_response(403, {"error": "User profile not found. Please log in again."})
+
+    plan = user.get("plan", "trial")
+    
+    # 2. Check trial expiration
+    if plan == "trial":
+        expires_at_str = user.get("trialExpiresAt")
+        if expires_at_str:
+            from datetime import datetime
+            expires_at = datetime.fromisoformat(expires_at_str.replace("Z", ""))
+            if datetime.utcnow() > expires_at:
+                return build_response(403, {"error": "Your free trial has expired. Please upgrade to continue."})
+
+    # 3. Check monthly job limit
+    jobs_used = int(user.get("jobsUsedThisMonth", 0))
+    limit = PLAN_LIMITS.get(plan, 10)
+    
+    if jobs_used >= limit:
+        return build_response(403, {"error": "Monthly job limit reached. Please upgrade your plan."})
+
+    # 4. Success -> Proceed with job creation
     session_id = body.get("sessionId")
     if not session_id:
         return build_response(400, {"error": "sessionId is required"})
@@ -72,10 +107,20 @@ def trigger_job(user_id: str, body: dict):
         "errors": [],
     }
 
-    # Save job record to DynamoDB
+    # Save job record
     jobs_table.put_item(Item=job_item)
 
-    # Publish message to SQS
+    # 5. Increment jobsUsedThisMonth
+    users_table.update_item(
+        Key={"userId": user_id},
+        UpdateExpression="SET jobsUsedThisMonth = jobsUsedThisMonth + :inc, updatedAt = :now",
+        ExpressionAttributeValues={
+            ":inc": 1,
+            ":now": now
+        }
+    )
+
+    # Publish to SQS
     sqs_params = {
         "QueueUrl": QUEUE_URL,
         "MessageBody": json.dumps({

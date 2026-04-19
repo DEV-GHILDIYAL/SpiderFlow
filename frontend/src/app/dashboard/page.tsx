@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { dashboardApi, type DashboardMetrics } from "@/lib/api";
+import { dashboardApi, usersApi, type DashboardMetrics, type UserProfile } from "@/lib/api";
+import TrialBanner from "@/components/TrialBanner";
 
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -14,11 +16,14 @@ export default function DashboardPage() {
 
   async function loadMetrics() {
     try {
-      const data = await dashboardApi.getMetrics();
-      setMetrics(data);
+      const [metricsData, profileData] = await Promise.all([
+        dashboardApi.getMetrics(),
+        usersApi.getMe()
+      ]);
+      setMetrics(metricsData);
+      setProfile(profileData);
     } catch (err) {
-      console.error("Failed to load metrics:", err);
-      // Use placeholder data for demo
+      console.error("Failed to load dashboard data:", err);
       setMetrics({
         totalSessions: 0,
         totalJobs: 0,
@@ -64,6 +69,48 @@ export default function DashboardPage() {
           Overview of your scraping activity and resource usage.
         </p>
       </div>
+
+      <TrialBanner />
+
+      {/* Usage Overview */}
+      {profile && (
+        <div className="glass-card" style={{ padding: "1.5rem", marginBottom: "2rem", background: "var(--sf-surface-elevated)" }}>
+           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+             <h2 style={{ fontSize: "1rem", fontWeight: 700 }}>Monthly Usage</h2>
+             <span className="badge badge-primary">{profile.planName}</span>
+           </div>
+           
+           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem" }}>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
+                  <span style={{ color: "var(--sf-text-muted)" }}>Jobs Used</span>
+                  <span style={{ fontWeight: 600 }}>{profile.jobsUsedThisMonth} / {profile.jobLimit === 1000000 ? "∞" : profile.jobLimit}</span>
+                </div>
+                <div style={{ height: "8px", background: "var(--sf-border-subtle)", borderRadius: "4px", overflow: "hidden" }}>
+                  <div style={{ 
+                    width: `${Math.min(100, (profile.jobsUsedThisMonth / (profile.jobLimit || 1)) * 100)}%`, 
+                    height: "100%", 
+                    backgroundColor: "var(--sf-primary)" 
+                  }} />
+                </div>
+              </div>
+              
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
+                  <span style={{ color: "var(--sf-text-muted)" }}>Pages Scraped</span>
+                  <span style={{ fontWeight: 600 }}>{profile.pagesScrapedThisMonth.toLocaleString()} / {profile.pageLimit === 1000000 ? "∞" : profile.pageLimit.toLocaleString()}</span>
+                </div>
+                <div style={{ height: "8px", background: "var(--sf-border-subtle)", borderRadius: "4px", overflow: "hidden" }}>
+                  <div style={{ 
+                    width: `${Math.min(100, (profile.pagesScrapedThisMonth / (profile.pageLimit || 1)) * 100)}%`, 
+                    height: "100%", 
+                    backgroundColor: "#a78bfa" 
+                  }} />
+                </div>
+              </div>
+           </div>
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div

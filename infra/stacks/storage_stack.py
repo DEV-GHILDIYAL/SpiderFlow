@@ -105,9 +105,22 @@ class StorageStack(cdk.Stack):
             auto_delete_objects=True,
         )
 
+        # ── Users Table (SaaS: Trial & Usage tracking) ──
+        self.users_table = dynamodb.Table(
+            self,
+            "UsersTable",
+            table_name="SpiderFlowUsers",
+            partition_key=dynamodb.Attribute(
+                name="userId", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
         # ── Outputs ──
         CfnOutput(self, "SessionsTableName", value=self.sessions_table.table_name)
         CfnOutput(self, "JobsTableName", value=self.jobs_table.table_name)
+        CfnOutput(self, "UsersTableName", value=self.users_table.table_name)
         CfnOutput(self, "DataBucketName", value=self.data_bucket.bucket_name)
         CfnOutput(self, "FrontendBucketName", value=self.frontend_bucket.bucket_name)
         CfnOutput(self, "FrontendBucketWebsiteUrl", value=self.frontend_bucket.bucket_website_url)

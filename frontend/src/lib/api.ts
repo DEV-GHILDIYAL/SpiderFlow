@@ -48,6 +48,7 @@ export interface Session {
   proxy: Record<string, string>;
   schedule: string | null;
   status: string;
+  scraping_provider?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -126,4 +127,26 @@ export const exportApi = {
     request<{ jobId: string; files: ExportFile[] }>(
       `/export?sessionId=${sessionId}&jobId=${jobId}`
     ),
+};
+
+// ── Users API (SaaS) ──
+
+export interface UserProfile {
+  userId: string;
+  plan: "trial" | "starter" | "pro" | "enterprise";
+  planName: string;
+  trialStartedAt: string;
+  trialExpiresAt: string;
+  trialDaysRemaining: number;
+  isTrialExpired: boolean;
+  jobsUsedThisMonth: number;
+  pagesScrapedThisMonth: number;
+  jobLimit: number;
+  pageLimit: number;
+  schedulerEnabled: boolean;
+}
+
+export const usersApi = {
+  getMe: () => request<UserProfile>("/users/me"),
+  resetUsage: () => request<{ message: string }>("/users/me/reset-usage", { method: "POST" }),
 };

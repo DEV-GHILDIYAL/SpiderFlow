@@ -32,6 +32,7 @@ api_stack = ApiStack(
     user_pool=cognito_stack.user_pool,
     sessions_table=storage_stack.sessions_table,
     jobs_table=storage_stack.jobs_table,
+    users_table=storage_stack.users_table,
     data_bucket=storage_stack.data_bucket,
     job_queue=queue_stack.job_queue,
 )
@@ -48,6 +49,7 @@ worker_stack = WorkerStack(
     job_queue=queue_stack.job_queue,
     jobs_table=storage_stack.jobs_table,
     sessions_table=storage_stack.sessions_table,
+    users_table=storage_stack.users_table,
 )
 worker_stack.add_dependency(storage_stack)
 worker_stack.add_dependency(queue_stack)

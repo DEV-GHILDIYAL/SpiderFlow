@@ -9,6 +9,7 @@ from aws_cdk import (
     aws_dynamodb as dynamodb,
     aws_s3 as s3,
     aws_sqs as sqs,
+    aws_secretsmanager as secrets,
     CfnOutput,
 )
 from constructs import Construct
@@ -25,6 +26,7 @@ class WorkerStack(cdk.Stack):
         job_queue: sqs.Queue,
         jobs_table: dynamodb.Table,
         sessions_table: dynamodb.Table,
+        users_table: dynamodb.Table,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -58,6 +60,17 @@ class WorkerStack(cdk.Stack):
         # Parse out the DLQ URL dynamic property correctly to not break stack linkage
         dlq_url = job_queue.dead_letter_queue.queue.queue_url if job_queue.dead_letter_queue else ""
 
+        # ── Secrets: External Scraping Keys ──
+        self.scraping_keys = secrets.Secret(
+            self,
+            "ScrapingKeys",
+            secret_name="SpiderFlowScrapingKeys",
+            generate_secret_string=secrets.SecretStringGenerator(
+                secret_string_template='{"SCRAPINGBEE_API_KEY": "", "SCRAPERAPI_API_KEY": ""}',
+                generate_string_key="dummy" # placeholders to be filled by user
+            )
+        )
+
         # ── Task Definition ──
         task_def = ecs.FargateTaskDefinition(
             self,
@@ -81,8 +94,18 @@ class WorkerStack(cdk.Stack):
                 "DATA_BUCKET": data_bucket.bucket_name,
                 "JOBS_TABLE": jobs_table.table_name,
                 "SESSIONS_TABLE": sessions_table.table_name,
+                "USERS_TABLE": users_table.table_name,
                 "DLQ_URL": dlq_url,
+                "SCRAPING_PROVIDER": "internal",
+                "BRIGHTDATA_HOST": "",
+                "BRIGHTDATA_PORT": "22225",
+                "BRIGHTDATA_USERNAME": "",
+                "BRIGHTDATA_PASSWORD": "",
             },
+            secrets={
+                "SCRAPINGBEE_API_KEY": ecs.Secret.from_secrets_manager(self.scraping_keys, "SCRAPINGBEE_API_KEY"),
+                "SCRAPERAPI_API_KEY": ecs.Secret.from_secrets_manager(self.scraping_keys, "SCRAPERAPI_API_KEY"),
+            }
         )
 
         # ── IAM Permissions ──
@@ -90,6 +113,8 @@ class WorkerStack(cdk.Stack):
         job_queue.grant_consume_messages(task_def.task_role)
         jobs_table.grant_read_write_data(task_def.task_role)
         sessions_table.grant_read_data(task_def.task_role)
+        users_table.grant_read_write_data(task_def.task_role)
+        self.scraping_keys.grant_read(task_def.task_role)
         if job_queue.dead_letter_queue:
             job_queue.dead_letter_queue.queue.grant_send_messages(task_def.task_role)
 

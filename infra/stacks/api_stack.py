@@ -23,6 +23,7 @@ class ApiStack(cdk.Stack):
         user_pool: cognito.UserPool,
         sessions_table: dynamodb.Table,
         jobs_table: dynamodb.Table,
+        users_table: dynamodb.Table,
         data_bucket: s3.Bucket,
         job_queue: sqs.Queue,
         **kwargs,
@@ -44,6 +45,7 @@ class ApiStack(cdk.Stack):
         common_env = {
             "SESSIONS_TABLE": sessions_table.table_name,
             "JOBS_TABLE": jobs_table.table_name,
+            "USERS_TABLE": users_table.table_name,
             "DATA_BUCKET": data_bucket.bucket_name,
             "JOB_QUEUE_URL": job_queue.queue_url,
         }
@@ -81,6 +83,7 @@ class ApiStack(cdk.Stack):
             memory_size=256,
         )
         jobs_table.grant_read_write_data(jobs_fn)
+        users_table.grant_read_write_data(jobs_fn)
         job_queue.grant_send_messages(jobs_fn)
 
         # ── Lambda: Dashboard / Metrics Handler ──
@@ -123,6 +126,23 @@ class ApiStack(cdk.Stack):
         # Upgraded to read/write for CSV PUT uploads + GeneratePresignedUrl
         data_bucket.grant_read_write(export_fn)
         jobs_table.grant_read_data(export_fn)
+
+        # ── Lambda: Users Handler (SaaS Control) ──
+        users_fn = _lambda.Function(
+            self,
+            "UsersHandler",
+            function_name="spiderflow-users",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="handler.lambda_handler",
+            code=_lambda.Code.from_asset(
+                os.path.join(os.path.dirname(__file__), "..", "..", "backend", "functions", "users")
+            ),
+            layers=[shared_layer],
+            environment=common_env,
+            timeout=cdk.Duration.seconds(20),
+            memory_size=256,
+        )
+        users_table.grant_read_write_data(users_fn)
 
         # ── API Gateway ──
         self.api = apigw.RestApi(
@@ -188,6 +208,18 @@ class ApiStack(cdk.Stack):
         export_resource.add_method("GET", apigw.LambdaIntegration(export_fn),
                                    authorizer=authorizer,
                                    authorization_type=apigw.AuthorizationType.COGNITO)
+
+        # /users
+        users_resource = self.api.root.add_resource("users")
+        me_resource = users_resource.add_resource("me")
+        me_resource.add_method("GET", apigw.LambdaIntegration(users_fn),
+                               authorizer=authorizer,
+                               authorization_type=apigw.AuthorizationType.COGNITO)
+        
+        reset_usage_resource = me_resource.add_resource("reset-usage")
+        reset_usage_resource.add_method("POST", apigw.LambdaIntegration(users_fn),
+                                        authorizer=authorizer,
+                                        authorization_type=apigw.AuthorizationType.COGNITO)
 
         # ── Outputs ──
         CfnOutput(self, "ApiUrl", value=self.api.url)

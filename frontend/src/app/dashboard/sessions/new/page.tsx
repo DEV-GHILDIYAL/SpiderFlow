@@ -11,6 +11,7 @@ export default function NewSessionPage() {
   const [selectors, setSelectors] = useState("");
   const [paginationSelector, setPaginationSelector] = useState("");
   const [maxPages, setMaxPages] = useState("50");
+  const [scrapingProvider, setScrapingProvider] = useState("internal");
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -35,6 +36,7 @@ export default function NewSessionPage() {
         pagination: paginationSelector
           ? { selector: paginationSelector, max_pages: parseInt(maxPages) || 50 }
           : {},
+        scraping_provider: scrapingProvider,
       });
       router.push("/dashboard/sessions");
     } catch (err) {
@@ -119,7 +121,29 @@ export default function NewSessionPage() {
             </div>
           </div>
 
-          {/* Section: Navigation */}
+          {/* Section: Advanced Configuration */}
+          <div className="form-section">
+            <h3 className="form-section-title">Advanced Configuration</h3>
+            <div>
+              <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+                Scraping Provider
+              </label>
+              <select
+                className="input-field"
+                value={scrapingProvider}
+                onChange={(e) => setScrapingProvider(e.target.value)}
+                style={{ appearance: "auto", paddingRight: "2rem" }}
+              >
+                <option value="internal">Internal (Free, best for simple sites)</option>
+                <option value="scrapingbee">ScrapingBee (Best for JavaScript / Premium Proxies)</option>
+                <option value="scraperapi">ScraperAPI (High speed / Reliability)</option>
+                <option value="brightdata">BrightData (Residential Proxies)</option>
+              </select>
+              <p style={{ fontSize: "0.75rem", color: "var(--sf-text-muted)", marginTop: "0.5rem" }}>
+                External providers handle bot-protected and highly dynamic websites better.
+              </p>
+            </div>
+          </div>
           <div className="form-section">
             <h3 className="form-section-title">Navigation</h3>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: "1rem" }}>

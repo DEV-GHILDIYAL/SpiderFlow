@@ -1,6 +1,9 @@
-"""Generic Spider – Configurable spider driven by session parameters."""
 import scrapy
 from scrapy_playwright.page import PageMethod
+try:
+    from scraping_providers import ProviderManager
+except ImportError:
+    ProviderManager = None
 
 
 class GenericSpider(scrapy.Spider):
@@ -40,10 +43,20 @@ class GenericSpider(scrapy.Spider):
         self.user_id = user_id
         self.pages_scraped = 0
         self.max_pages = int(self.pagination.get("max_pages", 50))
+        self.scraping_provider = kwargs.get("scraping_provider", "internal")
+        self.provider_manager = ProviderManager() if ProviderManager else None
 
     def start_requests(self):
-        """Yield initial requests with Playwright for JS rendering."""
+        """Yield initial requests. Use ProviderManager if configured."""
         for url in self.start_urls:
+            if self.scraping_provider != "internal" and self.provider_manager:
+                html = self.provider_manager.fetch(url, self.scraping_provider)
+                if html:
+                    # External provider returned HTML, parse it immediately
+                    yield from self.parse_external(url, html)
+                    continue
+
+            # Default: Scrapy/Playwright
             yield scrapy.Request(
                 url,
                 callback=self.parse,
@@ -54,6 +67,12 @@ class GenericSpider(scrapy.Spider):
                     ],
                 },
             )
+
+    def parse_external(self, url, html):
+        """Helper to create a response-like object from external HTML and parse it."""
+        from scrapy.http import HtmlResponse
+        response = HtmlResponse(url=url, body=html, encoding='utf-8')
+        yield from self.parse(response)
 
     def parse(self, response):
         """Extract data using configured selectors."""
@@ -88,6 +107,14 @@ class GenericSpider(scrapy.Spider):
             if next_selector:
                 next_page = response.css(next_selector).attrib.get("href")
                 if next_page:
+                    next_url = response.urljoin(next_page)
+                    
+                    if self.scraping_provider != "internal" and self.provider_manager:
+                        html = self.provider_manager.fetch(next_url, self.scraping_provider)
+                        if html:
+                            yield from self.parse_external(next_url, html)
+                            return
+
                     yield response.follow(
                         next_page,
                         callback=self.parse,
