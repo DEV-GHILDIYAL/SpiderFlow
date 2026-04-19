@@ -24,6 +24,7 @@ class WorkerStack(cdk.Stack):
         data_bucket: s3.Bucket,
         job_queue: sqs.Queue,
         jobs_table: dynamodb.Table,
+        sessions_table: dynamodb.Table,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -79,6 +80,7 @@ class WorkerStack(cdk.Stack):
                 "JOB_QUEUE_URL": job_queue.queue_url,
                 "DATA_BUCKET": data_bucket.bucket_name,
                 "JOBS_TABLE": jobs_table.table_name,
+                "SESSIONS_TABLE": sessions_table.table_name,
                 "DLQ_URL": dlq_url,
             },
         )
@@ -87,8 +89,20 @@ class WorkerStack(cdk.Stack):
         data_bucket.grant_read_write(task_def.task_role)
         job_queue.grant_consume_messages(task_def.task_role)
         jobs_table.grant_read_write_data(task_def.task_role)
+        sessions_table.grant_read_data(task_def.task_role)
         if job_queue.dead_letter_queue:
             job_queue.dead_letter_queue.queue.grant_send_messages(task_def.task_role)
+
+        # ── ECS Service ──
+        # Running the worker as a service ensures it's always polling SQS.
+        self.service = ecs.FargateService(
+            self,
+            "WorkerService",
+            cluster=self.cluster,
+            task_definition=task_def,
+            desired_count=1,
+            assign_public_ip=True, # Required if in public subnets or small stacks
+        )
 
         # ── Store references ──
         self.task_definition = task_def

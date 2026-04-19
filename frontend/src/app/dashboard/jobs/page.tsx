@@ -9,47 +9,64 @@ interface JobWithSession extends Job {
 
 export default function JobsPage() {
   const [jobs, setJobs] = useState<JobWithSession[]>([]);
+  const [sessionNames, setSessionNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [downloadingJob, setDownloadingJob] = useState<string | null>(null);
 
+  // Initial load: Fetch everything once and set names
   useEffect(() => {
-    loadJobs();
+    async function init() {
+      try {
+        const [sessions, jobsData] = await Promise.all([
+          sessionsApi.list().catch(() => []),
+          jobsApi.list().catch(() => []),
+        ]);
+        
+        const map = sessions.reduce((acc: Record<string, string>, s: Session) => {
+          acc[s.sessionId] = s.name;
+          return acc;
+        }, {} as Record<string, string>);
+        
+        setSessionNames(map);
+        
+        const jobsWithSessions: JobWithSession[] = jobsData.map((job: Job) => ({
+          ...job,
+          sessionName: map[job.sessionId] || "Unknown Session",
+        }));
+        setJobs(jobsWithSessions);
+      } catch (err) {
+        console.error("Init failed:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    init();
   }, []);
 
-  // Polling for live updates
+  // Polling for live updates: Only poll when active jobs exist, and use a stable interval
   useEffect(() => {
-    const activeJobs = jobs.filter(j => j.status === "queued" || j.status === "running");
+    const hasActiveJobs = jobs.some(j => j.status === "queued" || j.status === "running");
     
-    if (activeJobs.length > 0) {
+    if (hasActiveJobs) {
       const interval = setInterval(() => {
-        loadJobs();
-      }, 3000);
+        refreshJobsOnly();
+      }, 5000); 
       return () => clearInterval(interval);
     }
-  }, [jobs]);
+  }, [jobs.length, jobs.some(j => j.status === "queued" || j.status === "running")]);
 
-  async function loadJobs() {
+  async function refreshJobsOnly() {
     try {
-      const [sessions, jobsData] = await Promise.all([
-        sessionsApi.list().catch(() => []),
-        jobsApi.list().catch(() => []),
-      ]);
-
-      const sessionMap = sessions.reduce((acc: Record<string, string>, s: Session) => {
-        acc[s.sessionId] = s.name;
-        return acc;
-      }, {} as Record<string, string>);
-
-      const jobsWithSessions: JobWithSession[] = jobsData.map((job: Job) => ({
-        ...job,
-        sessionName: sessionMap[job.sessionId] || "Unknown Session",
-      }));
-
-      setJobs(jobsWithSessions);
+      const jobsData = await jobsApi.list().catch(() => []);
+      setJobs(prevJobs => {
+        // Map names from state
+        return jobsData.map((job: Job) => ({
+          ...job,
+          sessionName: sessionNames[job.sessionId] || "Unknown Session",
+        }));
+      });
     } catch (err) {
-      console.error("Failed to load jobs:", err);
-    } finally {
-      setLoading(false);
+      console.error("Failed to refresh jobs:", err);
     }
   }
 

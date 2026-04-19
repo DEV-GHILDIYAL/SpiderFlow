@@ -47,6 +47,7 @@ worker_stack = WorkerStack(
     data_bucket=storage_stack.data_bucket,
     job_queue=queue_stack.job_queue,
     jobs_table=storage_stack.jobs_table,
+    sessions_table=storage_stack.sessions_table,
 )
 worker_stack.add_dependency(storage_stack)
 worker_stack.add_dependency(queue_stack)
