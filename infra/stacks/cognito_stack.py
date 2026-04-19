@@ -1,4 +1,5 @@
 """Cognito User Pool Stack for SpiderFlow authentication."""
+import os
 import aws_cdk as cdk
 from aws_cdk import (
     aws_cognito as cognito,
@@ -36,6 +37,18 @@ class CognitoStack(cdk.Stack):
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
+        # ── OAuth URLs ──
+        # Support both local development and production environment
+        production_url = os.environ.get("PRODUCTION_URL")
+        callback_urls = ["http://localhost:3000/"]
+        logout_urls = ["http://localhost:3000/"]
+        
+        if production_url:
+            # Ensure URL format is consistent
+            clean_url = production_url.rstrip("/")
+            callback_urls.append(f"{clean_url}/")
+            logout_urls.append(f"{clean_url}/")
+
         # ── App Client ──
         self.user_pool_client = self.user_pool.add_client(
             "SpiderFlowWebClient",
@@ -47,8 +60,8 @@ class CognitoStack(cdk.Stack):
             o_auth=cognito.OAuthSettings(
                 flows=cognito.OAuthFlows(authorization_code_grant=True),
                 scopes=[cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
-                callback_urls=["http://localhost:3000/"],
-                logout_urls=["http://localhost:3000/"],
+                callback_urls=callback_urls,
+                logout_urls=logout_urls,
             ),
             prevent_user_existence_errors=True,
         )

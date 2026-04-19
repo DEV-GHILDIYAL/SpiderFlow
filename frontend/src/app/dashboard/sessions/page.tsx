@@ -128,13 +128,13 @@ export default function SessionsPage() {
                   >
                     ▶ Run
                   </button>
-                  <button
+                  <Link
+                    href={`/dashboard/sessions/edit?id=${session.sessionId}`}
                     className="btn-secondary"
-                    style={{ padding: "0.4rem 1rem", fontSize: "0.8rem", opacity: 0.6, cursor: "not-allowed" }}
-                    onClick={() => alert("Edit session feature is coming soon!")}
+                    style={{ padding: "0.4rem 1rem", fontSize: "0.8rem", textDecoration: "none" }}
                   >
                     Edit
-                  </button>
+                  </Link>
                   <button
                     className="btn-danger"
                     style={{ padding: "0.4rem 1rem", fontSize: "0.8rem" }}
