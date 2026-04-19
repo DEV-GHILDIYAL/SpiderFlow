@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { sessionsApi, jobsApi, type Session } from "@/lib/api";
 
 export default function SessionsPage() {
@@ -72,9 +73,9 @@ export default function SessionsPage() {
             Configure and manage your scraping sessions.
           </p>
         </div>
-        <button className="btn-primary" onClick={() => router.push("/dashboard/sessions/new")}>
+        <Link href="/dashboard/sessions/new" className="btn-primary" style={{ textDecoration: "none" }}>
           + New Session
-        </button>
+        </Link>
       </div>
 
       {/* Sessions List */}
@@ -94,9 +95,9 @@ export default function SessionsPage() {
           <p style={{ color: "var(--sf-text-muted)", marginBottom: "2rem", maxWidth: "400px" }}>
             Create your first scraping session to configure target websites and data extraction rules.
           </p>
-          <button className="btn-primary" onClick={() => router.push("/dashboard/sessions/new")}>
+          <Link href="/dashboard/sessions/new" className="btn-primary" style={{ textDecoration: "none" }}>
             + Create Session
-          </button>
+          </Link>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>

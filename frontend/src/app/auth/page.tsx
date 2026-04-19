@@ -211,62 +211,56 @@ export default function AuthPage() {
           {mode === "login" ? (
             <>
               Don&apos;t have an account?{" "}
-              <button
-                type="button"
+              <span
                 onClick={() => {
                   setMode("register");
                   clearError();
                 }}
                 style={{
-                  background: "none",
-                  border: "none",
                   color: "var(--sf-accent)",
                   cursor: "pointer",
                   fontWeight: 600,
+                  marginLeft: "0.25rem"
                 }}
               >
                 Sign Up
-              </button>
+              </span>
             </>
           ) : mode === "register" ? (
             <>
               Already have an account?{" "}
-              <button
-                type="button"
+              <span
                 onClick={() => {
                   setMode("login");
                   clearError();
                 }}
                 style={{
-                  background: "none",
-                  border: "none",
                   color: "var(--sf-accent)",
                   cursor: "pointer",
                   fontWeight: 600,
+                  marginLeft: "0.25rem"
                 }}
               >
                 Sign In
-              </button>
+              </span>
             </>
           ) : (mode === "forgot-password" || mode === "reset-password") ? (
             <>
               Remember your password?{" "}
-              <button
-                type="button"
+              <span
                 onClick={() => {
                   setMode("login");
                   clearError();
                 }}
                 style={{
-                  background: "none",
-                  border: "none",
                   color: "var(--sf-accent)",
                   cursor: "pointer",
                   fontWeight: 600,
+                  marginLeft: "0.25rem"
                 }}
               >
                 Back to Sign In
-              </button>
+              </span>
             </>
           ) : null}
         </div>

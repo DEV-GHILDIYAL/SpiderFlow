@@ -14,6 +14,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
 
   return (
     <aside className="sidebar">
@@ -78,13 +79,22 @@ export default function Sidebar() {
         </div>
         <button
           className="btn-secondary"
+          disabled={loggingOut}
           onClick={async () => {
-            await logout();
-            router.push("/");
+            setLoggingOut(true);
+            try {
+              await logout();
+              // No need to push, layout's useEffect will catch the null user and redirect
+            } catch (err) {
+              console.error("Sign out failed:", err);
+              router.push("/"); // Force redirect as fallback
+            } finally {
+              setLoggingOut(false);
+            }
           }}
-          style={{ width: "100%", padding: "0.5rem", fontSize: "0.8rem" }}
+          style={{ width: "100%", padding: "0.5rem", fontSize: "0.8rem", opacity: loggingOut ? 0.6 : 1 }}
         >
-          Sign Out
+          {loggingOut ? "Signing Out..." : "Sign Out"}
         </button>
       </div>
     </aside>
