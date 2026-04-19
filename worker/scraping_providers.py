@@ -1,5 +1,4 @@
-"""Scraping Providers Manager – Handles external API scrapers like ScrapingBee and ScraperAPI."""
-import os
+"""Scraping Providers Manager – Handles external scrapers with dynamic API keys."""
 import requests
 from abc import ABC, abstractmethod
 
@@ -14,7 +13,6 @@ class ScrapingBeeProvider(ScrapingProvider):
         self.endpoint = "https://app.scrapingbee.com/api/v1/"
 
     def fetch(self, url, options=None):
-        print(f"[PROVIDER] ScrapingBee fetching: {url}")
         params = {
             "api_key": self.api_key,
             "url": url,
@@ -31,7 +29,6 @@ class ScraperAPIProvider(ScrapingProvider):
         self.endpoint = "http://api.scraperapi.com/"
 
     def fetch(self, url, options=None):
-        print(f"[PROVIDER] ScraperAPI fetching: {url}")
         params = {
             "api_key": self.api_key,
             "url": url,
@@ -50,58 +47,38 @@ class BrightDataProvider(ScrapingProvider):
         }
 
     def fetch(self, url, options=None):
-        print(f"[PROVIDER] BrightData fetching: {url}")
         resp = requests.get(url, proxies=self.proxies, timeout=60, verify=False)
         resp.raise_for_status()
         return resp.text
 
 class ProviderManager:
-    def __init__(self):
-        self.primary_provider_name = os.environ.get("SCRAPING_PROVIDER", "internal")
+    def __init__(self, config=None):
+        """
+        config: dict containing provider details, e.g.
+        {'name': 'scrapingbee', 'apiKey': '...'}
+        """
+        self.config = config or {}
+        self.provider = None
         
-        # Initialize providers from ENV
-        self.providers = {}
+        name = self.config.get("name")
+        key = self.config.get("apiKey")
         
-        bee_key = os.environ.get("SCRAPINGBEE_API_KEY")
-        if bee_key:
-            self.providers["scrapingbee"] = ScrapingBeeProvider(bee_key)
-            
-        sapi_key = os.environ.get("SCRAPERAPI_API_KEY")
-        if sapi_key:
-            self.providers["scraperapi"] = ScraperAPIProvider(sapi_key)
-            
-        bd_host = os.environ.get("BRIGHTDATA_HOST")
-        if bd_host:
-            self.providers["brightdata"] = BrightDataProvider(
-                bd_host,
-                os.environ.get("BRIGHTDATA_PORT", "22225"),
-                os.environ.get("BRIGHTDATA_USERNAME"),
-                os.environ.get("BRIGHTDATA_PASSWORD")
-            )
+        if name == "scrapingbee":
+            self.provider = ScrapingBeeProvider(key)
+        elif name == "scraperapi":
+            self.provider = ScraperAPIProvider(key)
+        elif name == "brightdata":
+            # For BrightData, key might be 'host:port:user:pass'
+            parts = key.split(":")
+            if len(parts) == 4:
+                self.provider = BrightDataProvider(*parts)
 
-    def fetch(self, url, provider_name=None):
-        """Fetch HTML content using the specified or default provider with fallback."""
-        target_provider = provider_name or self.primary_provider_name
+    def fetch(self, url):
+        if not self.provider:
+            return None # Fallback to internal
         
-        if target_provider == "internal":
-            return None # Signal to use internal Scrapy/Playwright
-            
-        # Try requested provider
         try:
-            if target_provider in self.providers:
-                return self.providers[target_provider].fetch(url)
+            return self.provider.fetch(url)
         except Exception as e:
-            print(f"[PROVIDER] Requested provider {target_provider} failed: {e}")
-
-        # Fallback logic: scrapingbee -> scraperapi -> internal
-        for fallback in ["scrapingbee", "scraperapi"]:
-            if fallback == target_provider: continue
-            if fallback in self.providers:
-                try:
-                    print(f"[PROVIDER] Falling back to {fallback}")
-                    return self.providers[fallback].fetch(url)
-                except Exception as fe:
-                    print(f"[PROVIDER] Fallback {fallback} failed: {fe}")
-                    
-        print("[PROVIDER] All external providers failed or unavailable, falling back to internal")
-        return None
+            print(f"[PROVIDER] {self.config.get('name')} failed: {e}")
+            return None

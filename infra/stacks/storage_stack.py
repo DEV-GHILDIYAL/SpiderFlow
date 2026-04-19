@@ -1,4 +1,4 @@
-"""Storage Stack: DynamoDB tables and S3 buckets for SpiderFlow."""
+"""Storage Stack: DynamoDB tables and S3 buckets for SpiderFlow SaaS."""
 import aws_cdk as cdk
 from aws_cdk import (
     aws_dynamodb as dynamodb,
@@ -9,33 +9,46 @@ from constructs import Construct
 
 
 class StorageStack(cdk.Stack):
-    """DynamoDB tables and S3 buckets for sessions, jobs, and scraped data."""
+    """DynamoDB tables and S3 buckets for rooms, jobs, and user profiles."""
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # ── Sessions Table ──
-        self.sessions_table = dynamodb.Table(
+        # ── Users Table (Subscription & Usage) ──
+        self.users_table = dynamodb.Table(
             self,
-            "SessionsTable",
-            table_name="SpiderFlowSessions",
+            "UsersTable",
+            table_name="SpiderFlowUsers",
             partition_key=dynamodb.Attribute(
                 name="userId", type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="sessionId", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
 
-        # ── Jobs Table ──
+        # ── Rooms Table (Replacing Sessions) ──
+        self.rooms_table = dynamodb.Table(
+            self,
+            "RoomsTable",
+            table_name="SpiderFlowRooms",
+            partition_key=dynamodb.Attribute(
+                name="userId", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="roomId", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
+        # ── Jobs Table (Room-scoped) ──
+        # Partition Key updated to roomId as per SAAS requirements
         self.jobs_table = dynamodb.Table(
             self,
             "JobsTable",
             table_name="SpiderFlowJobs",
             partition_key=dynamodb.Attribute(
-                name="sessionId", type=dynamodb.AttributeType.STRING
+                name="roomId", type=dynamodb.AttributeType.STRING
             ),
             sort_key=dynamodb.Attribute(
                 name="jobId", type=dynamodb.AttributeType.STRING
@@ -43,18 +56,7 @@ class StorageStack(cdk.Stack):
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=cdk.RemovalPolicy.DESTROY,
         )
-        # GSI to query jobs by status
-        self.jobs_table.add_global_secondary_index(
-            index_name="StatusIndex",
-            partition_key=dynamodb.Attribute(
-                name="status", type=dynamodb.AttributeType.STRING
-            ),
-            sort_key=dynamodb.Attribute(
-                name="createdAt", type=dynamodb.AttributeType.STRING
-            ),
-        )
-
-        # GSI to query jobs by userId
+        # GSI remains for admin/overview queries if needed
         self.jobs_table.add_global_secondary_index(
             index_name="UserJobsIndex",
             partition_key=dynamodb.Attribute(
@@ -69,8 +71,6 @@ class StorageStack(cdk.Stack):
         self.data_bucket = s3.Bucket(
             self,
             "DataBucket",
-            bucket_name=None,  # auto-generated
-            versioned=False,
             encryption=s3.BucketEncryption.S3_MANAGED,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             removal_policy=cdk.RemovalPolicy.DESTROY,
@@ -105,22 +105,9 @@ class StorageStack(cdk.Stack):
             auto_delete_objects=True,
         )
 
-        # ── Users Table (SaaS: Trial & Usage tracking) ──
-        self.users_table = dynamodb.Table(
-            self,
-            "UsersTable",
-            table_name="SpiderFlowUsers",
-            partition_key=dynamodb.Attribute(
-                name="userId", type=dynamodb.AttributeType.STRING
-            ),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=cdk.RemovalPolicy.DESTROY,
-        )
-
         # ── Outputs ──
-        CfnOutput(self, "SessionsTableName", value=self.sessions_table.table_name)
-        CfnOutput(self, "JobsTableName", value=self.jobs_table.table_name)
         CfnOutput(self, "UsersTableName", value=self.users_table.table_name)
+        CfnOutput(self, "RoomsTableName", value=self.rooms_table.table_name)
+        CfnOutput(self, "JobsTableName", value=self.jobs_table.table_name)
         CfnOutput(self, "DataBucketName", value=self.data_bucket.bucket_name)
-        CfnOutput(self, "FrontendBucketName", value=self.frontend_bucket.bucket_name)
-        CfnOutput(self, "FrontendBucketWebsiteUrl", value=self.frontend_bucket.bucket_website_url)
+        CfnOutput(self, "FrontendUrl", value=self.frontend_bucket.bucket_website_url)

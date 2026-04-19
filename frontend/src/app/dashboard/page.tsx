@@ -2,153 +2,145 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { dashboardApi, usersApi, type DashboardMetrics, type UserProfile } from "@/lib/api";
-import TrialBanner from "@/components/TrialBanner";
+import { roomsApi, usersApi, type Room, type UserProfile } from "@/lib/api";
 
-export default function DashboardPage() {
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+export default function DashboardOverview() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadMetrics();
+    loadData();
   }, []);
 
-  async function loadMetrics() {
+  async function loadData() {
     try {
-      const [metricsData, profileData] = await Promise.all([
-        dashboardApi.getMetrics(),
-        usersApi.getMe()
-      ]);
-      setMetrics(metricsData);
-      setProfile(profileData);
+      const [p, r] = await Promise.all([usersApi.getMe(), roomsApi.list()]);
+      setProfile(p);
+      setRooms(r);
     } catch (err) {
-      console.error("Failed to load dashboard data:", err);
-      setMetrics({
-        totalSessions: 0,
-        totalJobs: 0,
-        completedJobs: 0,
-        failedJobs: 0,
-        queuedJobs: 0,
-        runningJobs: 0,
-        totalPagesScraped: 0,
-        totalItemsExtracted: 0,
-        storageUsedMB: 0,
-      });
+      console.error("Overview load failed:", err);
     } finally {
       setLoading(false);
     }
   }
 
   if (loading) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh" }}>
-        <div className="spinner" />
-      </div>
-    );
+     return <div className="animate-pulse space-y-4">
+       <div className="h-8 bg-sf-surface rounded w-1/4"></div>
+       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+         {[1,2,3].map(i => <div key={i} className="h-32 bg-sf-surface rounded-xl"></div>)}
+       </div>
+     </div>
   }
 
   const stats = [
-    { label: "Total Sessions", value: metrics?.totalSessions ?? 0, icon: "🕷️", color: "#6366f1" },
-    { label: "Running Jobs", value: metrics?.runningJobs ?? 0, icon: "🔄", color: "#60a5fa" },
-    { label: "Completed Jobs", value: metrics?.completedJobs ?? 0, icon: "✅", color: "#34d399" },
-    { label: "Failed Jobs", value: metrics?.failedJobs ?? 0, icon: "❌", color: "#f87171" },
-    { label: "Pages Scraped", value: metrics?.totalPagesScraped ?? 0, icon: "📄", color: "#a78bfa" },
-    { label: "Items Extracted", value: metrics?.totalItemsExtracted ?? 0, icon: "📦", color: "#fbbf24" },
-    { label: "Queued Jobs", value: metrics?.queuedJobs ?? 0, icon: "⏳", color: "#fb923c" },
-    { label: "Storage Used", value: `${metrics?.storageUsedMB ?? 0} MB`, icon: "💾", color: "#2dd4bf" },
+    { label: "Active Rooms", value: rooms.length, limit: profile?.roomLimit, icon: "🏢", color: "text-sf-primary" },
+    { label: "Jobs This Month", value: profile?.jobsUsedThisMonth || 0, limit: profile?.jobLimit, icon: "⚡", color: "text-sf-accent" },
+    { label: "Pages Scraped", value: profile?.pagesScrapedThisMonth || 0, limit: profile?.pageLimit, icon: "📄", color: "text-sf-success" },
   ];
 
   return (
-    <div className="animate-fadeIn">
-      <div style={{ marginBottom: "2rem" }}>
-        <h1 style={{ fontSize: "1.8rem", fontWeight: 800, marginBottom: "0.5rem" }}>
-          Dashboard
-        </h1>
-        <p style={{ color: "var(--sf-text-muted)", fontSize: "0.95rem" }}>
-          Overview of your scraping activity and resource usage.
-        </p>
+    <div className="space-y-10">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Good morning, Agent</h1>
+          <p className="text-sf-text-muted mt-1">Here is what is happening across your scraping infrastructure.</p>
+        </div>
+        <Link href="/dashboard/rooms/new" className="btn-primary flex items-center gap-2">
+          <span>+</span> Create New Room
+        </Link>
       </div>
 
-      <TrialBanner />
-
-      {/* Usage Overview */}
-      {profile && (
-        <div className="glass-card" style={{ padding: "1.5rem", marginBottom: "2rem", background: "var(--sf-surface-elevated)" }}>
-           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-             <h2 style={{ fontSize: "1rem", fontWeight: 700 }}>Monthly Usage</h2>
-             <span className="badge badge-primary">{profile.planName}</span>
-           </div>
-           
-           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem" }}>
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
-                  <span style={{ color: "var(--sf-text-muted)" }}>Jobs Used</span>
-                  <span style={{ fontWeight: 600 }}>{profile.jobsUsedThisMonth} / {profile.jobLimit === 1000000 ? "∞" : profile.jobLimit}</span>
-                </div>
-                <div style={{ height: "8px", background: "var(--sf-border-subtle)", borderRadius: "4px", overflow: "hidden" }}>
-                  <div style={{ 
-                    width: `${Math.min(100, (profile.jobsUsedThisMonth / (profile.jobLimit || 1)) * 100)}%`, 
-                    height: "100%", 
-                    backgroundColor: "var(--sf-primary)" 
-                  }} />
-                </div>
-              </div>
-              
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
-                  <span style={{ color: "var(--sf-text-muted)" }}>Pages Scraped</span>
-                  <span style={{ fontWeight: 600 }}>{profile.pagesScrapedThisMonth.toLocaleString()} / {profile.pageLimit === 1000000 ? "∞" : profile.pageLimit.toLocaleString()}</span>
-                </div>
-                <div style={{ height: "8px", background: "var(--sf-border-subtle)", borderRadius: "4px", overflow: "hidden" }}>
-                  <div style={{ 
-                    width: `${Math.min(100, (profile.pagesScrapedThisMonth / (profile.pageLimit || 1)) * 100)}%`, 
-                    height: "100%", 
-                    backgroundColor: "#a78bfa" 
-                  }} />
-                </div>
-              </div>
-           </div>
-        </div>
-      )}
-
       {/* Stats Grid */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-          gap: "1rem",
-          marginBottom: "2rem",
-        }}
-      >
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {stats.map((stat) => (
-          <div key={stat.label} className="stat-card">
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
-              <span style={{ fontSize: "1.2rem" }}>{stat.icon}</span>
-              <span style={{ fontSize: "0.8rem", color: "var(--sf-text-muted)", fontWeight: 500 }}>
-                {stat.label}
-              </span>
+          <div key={stat.label} className="glass-panel p-6 flex flex-col justify-between">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs font-bold text-sf-text-muted uppercase tracking-wider">{stat.label}</p>
+                <p className="text-4xl font-bold mt-2">{stat.value.toLocaleString()}</p>
+              </div>
+              <span className="text-3xl">{stat.icon}</span>
             </div>
-            <div style={{ fontSize: "1.6rem", fontWeight: 700, color: stat.color }}>
-              {typeof stat.value === "number" ? stat.value.toLocaleString() : stat.value}
+            
+            <div className="mt-6">
+               <div className="flex justify-between text-[10px] font-bold mb-1 uppercase tracking-widest text-sf-text-muted">
+                 <span>Usage</span>
+                 <span>{stat.limit === Infinity ? 'Unlimited' : `${Math.round((stat.value / (stat.limit || 1)) * 100)}%`}</span>
+               </div>
+               <div className="h-1.5 bg-sf-bg rounded-full overflow-hidden">
+                 <div 
+                   className={`h-full ${stat.color} bg-current rounded-full transition-all duration-1000`} 
+                   style={{ width: `${Math.min(100, (stat.value / (stat.limit || 1)) * 100)}%` }}
+                 />
+               </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Quick Actions */}
-      <div className="glass-card" style={{ padding: "1.5rem" }}>
-        <h2 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "1rem" }}>
-          Quick Actions
-        </h2>
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-          <Link href="/dashboard/sessions/new" className="btn-primary" style={{ textDecoration: "none" }}>
-            + New Session
-          </Link>
-          <Link href="/dashboard/jobs" className="btn-secondary" style={{ textDecoration: "none" }}>
-            View All Jobs
-          </Link>
+      {/* Recent Rooms */}
+      <div>
+        <div className="flex items-center justify-between mb-6">
+           <h3 className="text-lg font-bold">My Rooms</h3>
+           <Link href="/dashboard/rooms" className="text-sm font-semibold text-sf-primary hover:underline">View All</Link>
         </div>
+        
+        {rooms.length === 0 ? (
+          <div className="glass-panel p-12 text-center">
+            <div className="w-16 h-16 bg-sf-surface-elevated rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+              🕸️
+            </div>
+            <h4 className="font-bold">No rooms detected</h4>
+            <p className="text-sf-text-muted text-sm mt-1 mb-6">Create a room to start scraping data from target websites.</p>
+            <Link href="/dashboard/rooms/new" className="btn-secondary">Setup First Room</Link>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {rooms.slice(0, 4).map((room) => (
+              <Link 
+                key={room.roomId} 
+                href={`/dashboard/rooms/${room.roomId}`}
+                className="glass-panel p-4 hover:border-sf-primary transition-all group"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className={`status-dot ${room.status === 'active' ? 'bg-sf-success' : 'bg-sf-text-muted'}`} />
+                  <span className="text-[10px] font-bold text-sf-text-muted uppercase">{room.scrapingMethod}</span>
+                </div>
+                <h4 className="font-bold truncate group-hover:text-sf-primary transition-colors">{room.name}</h4>
+                <p className="text-[10px] text-sf-text-muted mt-1 truncate">{room.targetUrl || "No target URL"}</p>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Plan Summary Section */}
+      <div className="glass-panel p-8 bg-gradient-to-br from-sf-surface to-sf-bg">
+         <div className="flex flex-col md:flex-row items-center gap-8">
+            <div className="flex-1">
+               <h3 className="text-xl font-bold flex items-center gap-2">
+                 Plan: <span className={`badge badge-${profile?.plan}`}>{profile?.planName}</span>
+               </h3>
+               <p className="text-sf-text-muted mt-2 text-sm max-w-xl">
+                 Your subscription level determines your scraping capacity and access to advanced features like custom Python/JS code and external scraping APIs.
+               </p>
+               <div className="mt-6 flex gap-4">
+                  <Link href="/dashboard/billing" className="btn-primary text-sm">Review Billing</Link>
+                  <button className="btn-secondary text-sm">Download Invoices</button>
+               </div>
+            </div>
+            <div className="w-full md:w-64 space-y-4">
+               <div className="p-4 bg-sf-bg/50 rounded-xl border border-sf-border">
+                  <p className="text-[10px] font-bold text-sf-text-muted uppercase">Trial Clock</p>
+                  <p className="text-2xl font-bold mt-1 text-sf-warning">
+                    {profile?.trialDaysRemaining || 0} <span className="text-xs">Days Left</span>
+                  </p>
+               </div>
+            </div>
+         </div>
       </div>
     </div>
   );

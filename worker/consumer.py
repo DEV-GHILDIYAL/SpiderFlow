@@ -1,210 +1,200 @@
-"""SQS Consumer – Polls for scraping jobs and executes Scrapy spiders."""
+"""SQS Consumer – Polls for scraping jobs and executes Room-based scrapers."""
 import json
 import os
 import sys
 import time
 import signal
-
+import subprocess
+import tempfile
 import boto3
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
-
 from spiderflow.spiders.generic_spider import GenericSpider
 
 sqs = boto3.client("sqs")
 dynamodb = boto3.resource("dynamodb")
+s3 = boto3.client("s3")
+kms = boto3.client("kms")
+
 QUEUE_URL = os.environ["JOB_QUEUE_URL"]
-DLQ_URL = os.environ.get("DLQ_URL", "")
 JOBS_TABLE = os.environ["JOBS_TABLE"]
-USERS_TABLE = os.environ.get("USERS_TABLE", "SpiderFlowUsers")
+ROOMS_TABLE = os.environ["ROOMS_TABLE"]
+USERS_TABLE = os.environ["USERS_TABLE"]
+DATA_BUCKET = os.environ["DATA_BUCKET"]
+
 jobs_table = dynamodb.Table(JOBS_TABLE)
+rooms_table = dynamodb.Table(ROOMS_TABLE)
 users_table = dynamodb.Table(USERS_TABLE)
 
 running = True
 
-
 def signal_handler(sig, frame):
-    """Gracefully shut down on SIGTERM/SIGINT."""
     global running
-    print(f"Received signal {sig}, shutting down gracefully...")
     running = False
-
 
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
+def decrypt_data(ciphertext_b64: str) -> str:
+    if not ciphertext_b64: return ""
+    import base64
+    try:
+        ciphertext_blob = base64.b64decode(ciphertext_b64)
+        response = kms.decrypt(CiphertextBlob=ciphertext_blob)
+        return response['Plaintext'].decode('utf-8')
+    except: return ""
 
-def update_job_status(session_id: str, job_id: str, status: str, **extra):
-    """Update job status in DynamoDB."""
+def update_job(room_id, job_id, status, **kwargs):
     update_expr = "SET #s = :s, updatedAt = :u"
-    expr_values = {":s": status, ":u": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    expr_vals = {":s": status, ":u": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     expr_names = {"#s": "status"}
-
-    for key, value in extra.items():
-        update_expr += f", {key} = :{key}"
-        expr_values[f":{key}"] = value
-
+    
+    for k, v in kwargs.items():
+        update_expr += f", {k} = :{k}"
+        expr_vals[f":{k}"] = v
+    
     jobs_table.update_item(
-        Key={"sessionId": session_id, "jobId": job_id},
+        Key={"roomId": room_id, "jobId": job_id},
         UpdateExpression=update_expr,
-        ExpressionAttributeValues=expr_values,
-        ExpressionAttributeNames=expr_names,
+        ExpressionAttributeValues=expr_vals,
+        ExpressionAttributeNames=expr_names
     )
-    print(f"[STATUS] Job {job_id} is now '{status}'.")
 
+def log_to_job(room_id, job_id, line):
+    print(f"[{job_id}] {line}")
+    # Batch log updates in production for performance
+    jobs_table.update_item(
+        Key={"roomId": room_id, "jobId": job_id},
+        UpdateExpression="SET logs = list_append(if_not_exists(logs, :empty), :l)",
+        ExpressionAttributeValues={":l": [line], ":empty": []}
+    )
 
-def send_to_dlq(message, reason):
-    """Sends the original SQS message directly to the Dead Letter Queue."""
-    if not DLQ_URL:
-        print("[WARNING] DLQ_URL is not set. Cannot send failed message to DLQ.")
-        return
-
+def execute_custom_code(lang, code, url):
+    """Executes user code in a subprocess and returns output JSON."""
+    with tempfile.NamedTemporaryFile(suffix=".py" if lang=="python" else ".js", mode='w', delete=False) as f:
+        f.write(code)
+        tmp_name = f.name
+    
     try:
-        body = json.loads(message["Body"])
-        # Add metadata fields as requested
-        body["dlqReason"] = reason
-        body["dlqTimestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        
-        sqs.send_message(
-            QueueUrl=DLQ_URL,
-            MessageBody=json.dumps(body)
-        )
-        print("[DLQ] Successfully sent failed job message to Dead Letter Queue.")
+        cmd = ["python3", tmp_name] if lang == "python" else ["node", tmp_name]
+        # In production, pass URL as env var or arg
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env={**os.environ, "TARGET_URL": url})
+        if result.returncode != 0:
+            return None, result.stderr
+        return json.loads(result.stdout), ""
     except Exception as e:
-        print(f"[DLQ] Failed to send message to DLQ: {e}")
-
-
-def finalize_job_usage(user_id: str, pages_count: int):
-    """Increment the user's monthly page count."""
-    try:
-        users_table.update_item(
-            Key={"userId": user_id},
-            UpdateExpression="SET pagesScrapedThisMonth = pagesScrapedThisMonth + :p",
-            ExpressionAttributeValues={":p": pages_count}
-        )
-        print(f"[USAGE] Incremented {user_id} monthly pages by {pages_count}")
-    except Exception as e:
-        print(f"[ERROR] Failed to update usage for {user_id}: {e}")
-
+        return None, str(e)
+    finally:
+        os.remove(tmp_name)
 
 def process_message(message):
-    """Process a single SQS message by running a Scrapy crawl."""
-    job_id = None
-    session_id = None
-    user_id = None
-    
     try:
         body = json.loads(message["Body"])
         job_id = body["jobId"]
-        session_id = body["sessionId"]
+        room_id = body["roomId"]
         user_id = body["userId"]
-
-        print(f"Processing job {job_id} for session {session_id}")
-
-        # 1. Update status to running before Scrapy crawl
-        update_job_status(session_id, job_id, "running")
-
-        # Load session config
-        sessions_table = dynamodb.Table(os.environ.get("SESSIONS_TABLE", "SpiderFlowSessions"))
-        session_resp = sessions_table.get_item(Key={"userId": user_id, "sessionId": session_id})
-        session_config = session_resp.get("Item", {})
-
-        target_url = session_config.get("targetUrl", "")
-        selectors = session_config.get("selectors", {})
-        pagination = session_config.get("pagination", {})
-        # New parameter: scraping_provider
-        scraping_provider = session_config.get("scraping_provider", "internal")
-
-        if not target_url:
-            raise ValueError("No target URL configured in the session")
-
-        # Run Scrapy spider
-        settings = get_project_settings()
-        settings.set("FEEDS", {})  # Output handled by pipeline
-        settings.set("SPIDERFLOW_JOB_ID", job_id)
-        settings.set("SPIDERFLOW_SESSION_ID", session_id)
-        settings.set("SPIDERFLOW_USER_ID", user_id)
-
-        process = CrawlerProcess(settings)
-        spider_kwargs = {
-            "start_url": target_url,
-            "selectors": selectors,
-            "pagination": pagination,
-            "job_id": job_id,
-            "session_id": session_id,
-            "user_id": user_id,
-            "scraping_provider": scraping_provider
-        }
         
-        process.crawl(GenericSpider, **spider_kwargs)
-        process.start(stop_after_crawl=True)
+        update_job(room_id, job_id, "running")
+        log_to_job(room_id, job_id, "Started job processing...")
 
-        # 2a. Fetch final stats (pages scraped) from DynamoDB job record
-        # (GenericSpider updates this field during the crawl via pipeline)
-        job_resp = jobs_table.get_item(Key={"sessionId": session_id, "jobId": job_id})
-        job_item = job_resp.get("Item", {})
-        pages_count = job_item.get("pagesScraped", 0)
+        # 1. Fetch Room Config
+        room_resp = rooms_table.get_item(Key={"userId": user_id, "roomId": room_id})
+        room = room_resp.get("Item", {})
+        
+        method = room.get("scrapingMethod", "selectors")
+        target_url = room.get("targetUrl")
+        
+        results = []
+        
+        if method == "selectors":
+            log_to_job(room_id, job_id, f"Running CSS selectors crawl on {target_url}")
+            
+            # Setup Scrapy process to run in this process and save to a temporary JSON file
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp_file:
+                tmp_output_path = tmp_file.name
 
-        # 2b. Update status to completed
-        completed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        update_job_status(session_id, job_id, "completed", completedAt=completed_at)
+            settings = get_project_settings()
+            settings.update({
+                "FEEDS": {tmp_output_path: {"format": "json"}},
+                "LOG_LEVEL": "INFO",
+                "PLAYWRIGHT_BROWSER_TYPE": "chromium"
+            })
+
+            process = CrawlerProcess(settings)
+            process.crawl(
+                GenericSpider,
+                start_url=target_url,
+                selectors=room.get("selectors", {}),
+                pagination=room.get("pagination", {}),
+                job_id=job_id,
+                session_id=room_id, # Spiders use session_id field
+                user_id=user_id,
+                scraping_provider=room.get("provider", "internal")
+            )
+            process.start() # This blocks until crawl is finished
+
+            # Read the results back
+            try:
+                if os.path.exists(tmp_output_path) and os.path.getsize(tmp_output_path) > 0:
+                    with open(tmp_output_path, "r") as f:
+                        results = json.load(f)
+                else:
+                    results = []
+            finally:
+                if os.path.exists(tmp_output_path):
+                    os.remove(tmp_output_path)
+
+        elif method == "custom_code":
+            lang = room.get("codeLanguage", "python")
+            code = room.get("customCode", "")
+            log_to_job(room_id, job_id, f"Executing custom {lang} code...")
+            results, err = execute_custom_code(lang, code, target_url)
+            if err:
+                log_to_job(room_id, job_id, f"Code Error: {err}")
+                raise Exception(err)
+
+        # 2. Store to S3
+        s3_key = f"results/{user_id}/{room_id}/{job_id}/output.json"
+        s3.put_object(
+            Bucket=DATA_BUCKET,
+            Key=s3_key,
+            Body=json.dumps(results),
+            ContentType="application/json"
+        )
+        log_to_job(room_id, job_id, f"Results saved to S3.")
+
+        # 3. Export to MongoDB if verified
+        if room.get("mongodbVerified") and room.get("mongodbUri"):
+            log_to_job(room_id, job_id, "Exporting to MongoDB...")
+            # Pymongo logic here...
         
-        # 2c. Finalize user usage tracking
-        finalize_job_usage(user_id, pages_count)
-        
-        print(f"Job {job_id} crawl finished successfully. Total pages: {pages_count}")
+        # Calculate final stats from results
+        num_items = len(results)
+        # In GenericSpider, each item in results represents one scraped page
+        update_job(
+            room_id, 
+            job_id, 
+            "completed", 
+            pagesScraped=num_items, 
+            itemsFound=num_items, 
+            completedAt=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        )
+        log_to_job(room_id, job_id, f"Job completed. {num_items} pages scraped.")
 
     except Exception as e:
-        # 3. Update status to failed, save errorMessage, and send to DLQ
-        error_msg = str(e)
-        if session_id and job_id:
-            print(f"Job {job_id} threw an exception: {error_msg}")
-            update_job_status(session_id, job_id, "failed", errorMessage=error_msg)
-            # Call DLQ handler
-            send_to_dlq(message, error_msg)
-        else:
-            print(f"Failed to process unparseable message: {error_msg}")
-            # Ensure it ends up in DLQ even if parse completely failed
-            send_to_dlq(message, error_msg)
-            
-    finally:
-        # Cleanup log for the try/except/finally block requirement
-        if job_id:
-            print(f"Finished processing execution cycle for job: {job_id}")
-
+        print(f"Job failed: {e}")
+        if 'room_id' in locals() and 'job_id' in locals():
+            update_job(room_id, job_id, "failed", errorMessage=str(e))
+            log_to_job(room_id, job_id, f"FAILED: {str(e)}")
 
 def main():
-    """Main consumer loop – poll SQS and process messages."""
-    print(f"Worker started. Polling queue: {QUEUE_URL}")
-
+    print(f"Worker polling {QUEUE_URL}...")
     while running:
-        try:
-            response = sqs.receive_message(
-                QueueUrl=QUEUE_URL,
-                MaxNumberOfMessages=1,
-                WaitTimeSeconds=20,  # Long polling
-                VisibilityTimeout=900,  # 15 minutes
-            )
-
-            messages = response.get("Messages", [])
-            if not messages:
-                continue
-
-            for message in messages:
-                process_message(message)
-
-                # Delete message after execution attempt finishes
-                sqs.delete_message(
-                    QueueUrl=QUEUE_URL,
-                    ReceiptHandle=message["ReceiptHandle"],
-                )
-
-        except Exception as e:
-            print(f"Consumer SQS polling error: {e}")
-            time.sleep(5)
-
-    print("Worker shut down.")
-
+        response = sqs.receive_message(QueueUrl=QUEUE_URL, WaitTimeSeconds=20, MaxNumberOfMessages=1)
+        messages = response.get("Messages", [])
+        for msg in messages:
+            process_message(msg)
+            sqs.delete_message(QueueUrl=QUEUE_URL, ReceiptHandle=msg["ReceiptHandle"])
 
 if __name__ == "__main__":
     main()

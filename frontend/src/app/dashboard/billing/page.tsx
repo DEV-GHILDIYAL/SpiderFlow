@@ -1,181 +1,184 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usersApi, type UserProfile } from "@/lib/api";
+import { usersApi, billingApi, type UserProfile } from "@/lib/api";
 
-const PLANS = [
-  {
-    id: "starter",
-    name: "Starter",
-    price: "$29",
-    features: [
-      "100 jobs / month",
-      "5,000 pages / month",
-      "Scheduled scraping",
-      "Email support"
-    ],
-    accent: "#6366f1"
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    price: "$99",
-    features: [
-      "1,000 jobs / month",
-      "50,000 pages / month",
-      "Scheduled scraping",
-      "Priority support",
-      "External Scraping APIs"
-    ],
-    accent: "#a78bfa",
-    popular: true
-  },
-  {
-    id: "enterprise",
-    name: "Enterprise",
-    price: "$299",
-    features: [
-      "Unlimited jobs & pages",
-      "Custom scraping providers",
-      "Dedicated support",
-      "SLA guarantee"
-    ],
-    accent: "#f43f5e"
-  }
-];
+declare var Razorpay: any;
 
 export default function BillingPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [upgrading, setUpgrading] = useState<string | null>(null);
 
   useEffect(() => {
-    async function loadProfile() {
-      try {
-        const data = await usersApi.getMe();
-        setProfile(data);
-      } catch (err) {
-        console.error("Failed to load billing profile:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
     loadProfile();
+    // Load Razorpay Script
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    document.body.appendChild(script);
   }, []);
 
-  if (loading) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh" }}>
-        <div className="spinner" />
-      </div>
-    );
+  async function loadProfile() {
+    try {
+      const data = await usersApi.getMe();
+      setProfile(data);
+    } catch (err) {
+      console.error("Billing load failed:", err);
+    } finally {
+      setLoading(false);
+    }
   }
 
+  async function handleUpgrade(plan: string) {
+    if (plan === "enterprise") {
+      window.location.href = "mailto:sales@spiderflow.com?subject=Enterprise Plan Inquiry";
+      return;
+    }
+
+    setUpgrading(plan);
+    try {
+      const order = await billingApi.createOrder(plan);
+      
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_5W6xO8fLoD5k7v", // Placeholder
+        amount: order.amount,
+        currency: order.currency,
+        name: "SpiderFlow Cloud",
+        description: `Upgrade to ${plan} Plan`,
+        order_id: order.id,
+        handler: async function (response: any) {
+          try {
+            await billingApi.verifyPayment({
+               ...response,
+               plan
+            });
+            alert("Upgrade Successful!");
+            loadProfile();
+          } catch (err: any) {
+            alert(err.message || "Payment verification failed.");
+          }
+        },
+        prefill: {
+          email: profile?.email,
+        },
+        theme: {
+          color: "#3b82f6",
+        },
+      };
+
+      const rzp = new Razorpay(options);
+      rzp.open();
+    } catch (err: any) {
+      alert(err.message || "Failed to initiate payment.");
+    } finally {
+      setUpgrading(null);
+    }
+  }
+
+  if (loading) return <div className="animate-pulse h-96 bg-sf-surface rounded-xl"></div>;
+
+  const plans = [
+    {
+      id: "trial",
+      name: "Free Trial",
+      price: "₹0",
+      period: "7 days",
+      features: ["1 Room", "10 Jobs / mo", "500 Pages / mo", "Internal Provider Only"],
+      limits: { rooms: 1, jobs: 10, pages: 500 }
+    },
+    {
+      id: "starter",
+      name: "Starter",
+      price: "₹999",
+      period: "per month",
+      features: ["5 Rooms", "100 Jobs / mo", "5,000 Pages / mo", "Scheduler Enabled", "MongoDB Export"],
+      limits: { rooms: 5, jobs: 100, pages: 5000 }
+    },
+    {
+      id: "pro",
+      name: "Pro",
+      price: "₹2,999",
+      period: "per month",
+      features: ["20 Rooms", "1,000 Jobs / mo", "50,000 Pages / mo", "Custom Code (Py/JS)", "Premium APIs"],
+      limits: { rooms: 20, jobs: 1000, pages: 50000 }
+    },
+    {
+      id: "enterprise",
+      name: "Enterprise",
+      price: "₹9,999",
+      period: "per month",
+      features: ["Unlimited Rooms", "Unlimited Jobs", "Dedicated Fargate", "Priority Support", "SLA Guarantee"],
+      limits: { rooms: Infinity, jobs: Infinity, pages: Infinity }
+    },
+  ];
+
   return (
-    <div className="animate-fadeIn">
-      <div style={{ marginBottom: "2.5rem" }}>
-        <h1 style={{ fontSize: "1.8rem", fontWeight: 800, marginBottom: "0.5rem" }}>
-          Plans & Billing
-        </h1>
-        <p style={{ color: "var(--sf-text-muted)", fontSize: "0.95rem" }}>
-          Choose the right plan for your scraping needs. No hidden fees.
-        </p>
+    <div className="space-y-10 animate-fadeIn">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold">Billing & Subscriptions</h1>
+        <p className="text-sf-text-muted mt-2">Scalable plans for developers and businesses of all sizes.</p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "2rem" }}>
-        {PLANS.map((plan) => {
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {plans.map((plan) => {
           const isCurrent = profile?.plan === plan.id;
-          const isTrial = profile?.plan === "trial" && plan.id === "starter"; // Suggest upgrade from trial to starter
-
           return (
-            <div
-              key={plan.id}
-              className="glass-card"
-              style={{
-                padding: "2rem",
-                position: "relative",
-                display: "flex",
-                flexDirection: "column",
-                border: isCurrent ? `2px solid ${plan.accent}` : "1px solid var(--sf-border-subtle)",
-                boxShadow: isCurrent ? `0 10px 30px -10px ${plan.accent}44` : "none",
-              }}
+            <div 
+              key={plan.id} 
+              className={`glass-panel p-8 flex flex-col justify-between border-2 transition-all ${
+                isCurrent ? 'border-sf-primary ring-4 ring-sf-primary/10 bg-sf-primary/5 shadow-2xl' : 'border-sf-border'
+              }`}
             >
-              {plan.popular && (
-                <div style={{
-                  position: "absolute",
-                  top: "-12px",
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  backgroundColor: plan.accent,
-                  color: "white",
-                  padding: "4px 12px",
-                  borderRadius: "20px",
-                  fontSize: "0.75rem",
-                  fontWeight: 800,
-                  textTransform: "uppercase"
-                }}>
-                  Most Popular
+              <div>
+                <div className="flex justify-between items-start mb-4">
+                  <h3 className="text-xl font-bold">{plan.name}</h3>
+                  {isCurrent && <span className="badge badge-enterprise">Current</span>}
                 </div>
-              )}
-
-              <div style={{ marginBottom: "1.5rem" }}>
-                <h3 style={{ fontSize: "1.2rem", fontWeight: 800, color: plan.accent, marginBottom: "0.25rem" }}>
-                  {plan.name}
-                </h3>
-                <div style={{ display: "flex", alignItems: "baseline", gap: "0.25rem" }}>
-                  <span style={{ fontSize: "2rem", fontWeight: 900 }}>{plan.price}</span>
-                  <span style={{ color: "var(--sf-text-muted)", fontSize: "0.9rem" }}>/month</span>
+                <div className="mb-6">
+                  <span className="text-4xl font-bold">{plan.price}</span>
+                  <span className="text-xs text-sf-text-muted ml-2">{plan.period}</span>
                 </div>
+                <ul className="space-y-3 mb-8">
+                  {plan.features.map(f => (
+                    <li key={f} className="text-sm flex items-center gap-2">
+                      <span className="text-sf-success">✓</span> {f}
+                    </li>
+                  ))}
+                </ul>
               </div>
 
-              {isCurrent && (
-                <div style={{ 
-                  backgroundColor: "rgba(52, 211, 153, 0.1)", 
-                  color: "#10b981", 
-                  padding: "1rem", 
-                  borderRadius: "10px", 
-                  marginBottom: "1.5rem",
-                  fontSize: "0.85rem",
-                  border: "1px solid rgba(52, 211, 153, 0.2)"
-                }}>
-                  <div style={{ fontWeight: 800, marginBottom: "0.5rem" }}>Your Current Plan</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.25rem" }}>
-                    <span>Jobs Used</span>
-                    <span>{profile.jobsUsedThisMonth} / {profile.jobLimit === 1000000 ? "∞" : profile.jobLimit}</span>
-                  </div>
-                  <div style={{ height: "6px", backgroundColor: "rgba(52, 211, 153, 0.1)", borderRadius: "3px", overflow: "hidden" }}>
-                    <div style={{ 
-                      width: `${Math.min(100, (profile.jobsUsedThisMonth / (profile.jobLimit || 1)) * 100)}%`, 
-                      height: "100%", 
-                      backgroundColor: "#10b981" 
-                    }} />
-                  </div>
+              {isCurrent ? (
+                <div className="pt-6 border-t border-sf-border/50">
+                  <p className="text-[10px] font-bold text-sf-text-muted uppercase mb-1">Active Usage</p>
+                   <div className="space-y-2">
+                      <div>
+                        <div className="flex justify-between text-[8px] mb-1">
+                          <span>Jobs: {profile.jobsUsedThisMonth} / {plan.limits.jobs}</span>
+                        </div>
+                        <div className="h-1 bg-sf-bg rounded-full overflow-hidden">
+                           <div className="h-full bg-sf-primary" style={{ width: `${(profile.jobsUsedThisMonth / (plan.limits.jobs || 1)) * 100}%` }} />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[8px] mb-1">
+                          <span>Pages: {profile.pagesScrapedThisMonth} / {plan.limits.pages}</span>
+                        </div>
+                        <div className="h-1 bg-sf-bg rounded-full overflow-hidden">
+                           <div className="h-full bg-sf-accent" style={{ width: `${(profile.pagesScrapedThisMonth / (plan.limits.pages || 1)) * 100}%` }} />
+                        </div>
+                      </div>
+                   </div>
                 </div>
-              )}
-
-              <ul style={{ listStyle: "none", padding: 0, margin: "0 0 2rem 0", flex: 1 }}>
-                {plan.features.map((feature) => (
-                  <li key={feature} style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem", fontSize: "0.9rem" }}>
-                    <span style={{ color: "#10b981" }}>✓</span>
-                    {feature}
-                  </li>
-                ))}
-              </ul>
-
-              {plan.id === "enterprise" ? (
-                <a
-                  href="mailto:sales@spiderflow.com?subject=Enterprise Plan Inquiry"
-                  className="btn-secondary"
-                  style={{ textAlign: "center", textDecoration: "none", padding: "0.8rem" }}
-                >
-                  Contact Sales
-                </a>
               ) : (
-                <button
-                  className={isCurrent ? "btn-secondary" : "btn-primary"}
-                  disabled={isCurrent}
-                  style={{ padding: "0.8rem", cursor: isCurrent ? "default" : "pointer" }}
+                <button 
+                  onClick={() => handleUpgrade(plan.id)}
+                  disabled={upgrading !== null}
+                  className={`w-full py-3 rounded-lg font-bold text-sm uppercase tracking-widest transition-all ${
+                    plan.id === 'enterprise' ? 'btn-secondary' : 'btn-primary'
+                  }`}
                 >
-                  {isCurrent ? "Current Plan" : `Upgrade to ${plan.name}`}
+                  {upgrading === plan.id ? "Processing..." : plan.id === 'enterprise' ? "Contact Sales" : "Upgrade Plan"}
                 </button>
               )}
             </div>
@@ -183,17 +186,24 @@ export default function BillingPage() {
         })}
       </div>
 
-      <div className="glass-card" style={{ marginTop: "3rem", padding: "2rem", textAlign: "center" }}>
-        <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "1rem" }}>
-          Need a custom solution?
-        </h3>
-        <p style={{ color: "var(--sf-text-muted)", fontSize: "0.9rem", marginBottom: "1.5rem", maxWidth: "600px", margin: "0 auto 1.5rem" }}>
-          If none of our standard plans fit your specific scraping volume or architecture requirements, 
-          our team can build a custom integration for you.
-        </p>
-        <a href="mailto:support@spiderflow.com" style={{ color: "var(--sf-primary)", fontWeight: 700, textDecoration: "none" }}>
-          Talk to an Expert →
-        </a>
+      {/* FAQ / Info */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-10">
+         <div className="glass-panel p-6">
+            <h4 className="font-bold flex items-center gap-2 mb-2">
+              <span>💳</span> Secure Payments
+            </h4>
+            <p className="text-xs text-sf-text-muted">
+              Payments are handled securely via Razorpay. We do not store your credit card information on our servers.
+            </p>
+         </div>
+         <div className="glass-panel p-6">
+            <h4 className="font-bold flex items-center gap-2 mb-2">
+              <span>🔄</span> Usage Resets
+            </h4>
+            <p className="text-xs text-sf-text-muted">
+              Monthly quotas reset on the 1st of every month at 00:00 UTC. Unused quota does not roll over.
+            </p>
+         </div>
       </div>
     </div>
   );

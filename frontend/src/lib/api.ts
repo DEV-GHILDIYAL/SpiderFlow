@@ -11,10 +11,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   }
 }
 
-async function request<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T> {
+async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const authHeaders = await getAuthHeaders();
   const baseUrl = API_BASE_URL.replace(/\/+$/, "");
   const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
@@ -36,117 +33,88 @@ async function request<T>(
   return response.json();
 }
 
-// ── Sessions API ──
+// ── User API ──
 
-export interface Session {
+export interface UserProfile {
   userId: string;
-  sessionId: string;
+  email?: string;
+  plan: "trial" | "starter" | "pro" | "enterprise";
+  planName: string;
+  trialExpiresAt?: string;
+  trialDaysRemaining?: number;
+  isTrialExpired?: boolean;
+  roomsUsed: number;
+  jobsUsedThisMonth: number;
+  pagesScrapedThisMonth: number;
+  jobLimit: number;
+  pageLimit: number;
+  roomLimit: number;
+}
+
+export const usersApi = {
+  getMe: () => request<UserProfile>("/users/me"),
+  init: () => request<UserProfile>("/users/me/init", { method: "POST" }),
+};
+
+// ── Room API ──
+
+export interface Room {
+  userId: string;
+  roomId: string;
   name: string;
-  targetUrl: string;
-  selectors: Record<string, string>;
-  pagination: Record<string, string | number>;
-  proxy: Record<string, string>;
-  schedule: string | null;
-  status: string;
-  scraping_provider?: string;
+  targetUrl?: string;
+  scrapingMethod: "selectors" | "custom_code";
+  selectors?: Record<string, string>;
+  customCode?: string;
+  codeLanguage?: "python" | "javascript";
+  provider: "internal" | "scrapingbee" | "scraperapi" | "brightdata";
+  providerApiKey?: string;
+  scheduleEnabled: boolean;
+  scheduleCron?: string;
+  mongodbUri?: string;
+  mongodbDatabase?: string;
+  mongodbCollection?: string;
+  mongodbVerified?: boolean;
+  status: "active" | "paused";
   createdAt: string;
   updatedAt: string;
 }
 
-export const sessionsApi = {
-  list: () => request<Session[]>("/sessions"),
-  get: (id: string) => request<Session>(`/sessions/${id}`),
-  create: (data: Partial<Session>) =>
-    request<Session>("/sessions", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  update: (id: string, data: Partial<Session>) =>
-    request<{ message: string; sessionId: string }>(`/sessions/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-  delete: (id: string) =>
-    request<{ message: string; sessionId: string }>(`/sessions/${id}`, {
-      method: "DELETE",
-    }),
+export const roomsApi = {
+  list: () => request<Room[]>("/rooms"),
+  get: (roomId: string) => request<Room>(`/rooms/${roomId}`),
+  create: (name: string) => request<Room>("/rooms", { method: "POST", body: JSON.stringify({ name }) }),
+  update: (roomId: string, data: Partial<Room>) => request<{ message: string }>(`/rooms/${roomId}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (roomId: string) => request<{ message: string }>(`/rooms/${roomId}`, { method: "DELETE" }),
+  verifyMongo: (roomId: string) => request<{ message: string }>(`/rooms/${roomId}/verify-mongo`, { method: "POST" }),
 };
 
 // ── Jobs API ──
 
 export interface Job {
-  sessionId: string;
+  roomId: string;
   jobId: string;
   userId: string;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
+  status: "pending" | "running" | "completed" | "failed";
+  provider: string;
   pagesScraped: number;
-  itemsExtracted: number;
-  errors: string[];
+  itemsFound: number;
+  errorMessage?: string;
+  logs: string[];
+  createdAt: string;
+  completedAt?: string;
 }
 
 export const jobsApi = {
-  trigger: (sessionId: string) =>
-    request<Job>("/jobs", {
-      method: "POST",
-      body: JSON.stringify({ sessionId }),
-    }),
-  list: () => request<Job[]>("/jobs"),
-  get: (jobId: string) => request<Job>(`/jobs/${jobId}`),
+  list: (roomId: string) => request<Job[]>(`/rooms/${roomId}/jobs`),
+  get: (roomId: string, jobId: string) => request<Job>(`/rooms/${roomId}/jobs/${jobId}`),
+  trigger: (roomId: string) => request<Job>(`/rooms/${roomId}/jobs`, { method: "POST" }),
+  getExport: (roomId: string, jobId: string) => request<{ downloadUrl: string }>(`/rooms/${roomId}/jobs/${jobId}/export`),
 };
 
-// ── Dashboard API ──
+// ── Billing API ──
 
-export interface DashboardMetrics {
-  totalSessions: number;
-  totalJobs: number;
-  completedJobs: number;
-  failedJobs: number;
-  queuedJobs: number;
-  runningJobs: number;
-  totalPagesScraped: number;
-  totalItemsExtracted: number;
-  storageUsedMB: number;
-}
-
-export const dashboardApi = {
-  getMetrics: () => request<DashboardMetrics>("/dashboard"),
-};
-
-// ── Export API ──
-
-export interface ExportFile {
-  filename: string;
-  size: number;
-  url: string;
-}
-
-export const exportApi = {
-  getDownloadLinks: (sessionId: string, jobId: string) =>
-    request<{ jobId: string; files: ExportFile[] }>(
-      `/export?sessionId=${sessionId}&jobId=${jobId}`
-    ),
-};
-
-// ── Users API (SaaS) ──
-
-export interface UserProfile {
-  userId: string;
-  plan: "trial" | "starter" | "pro" | "enterprise";
-  planName: string;
-  trialStartedAt: string;
-  trialExpiresAt: string;
-  trialDaysRemaining: number;
-  isTrialExpired: boolean;
-  jobsUsedThisMonth: number;
-  pagesScrapedThisMonth: number;
-  jobLimit: number;
-  pageLimit: number;
-  schedulerEnabled: boolean;
-}
-
-export const usersApi = {
-  getMe: () => request<UserProfile>("/users/me"),
-  resetUsage: () => request<{ message: string }>("/users/me/reset-usage", { method: "POST" }),
+export const billingApi = {
+  createOrder: (plan: string) => request<any>("/billing/create-order", { method: "POST", body: JSON.stringify({ plan }) }),
+  verifyPayment: (data: any) => request<{ message: string }>("/billing/verify-payment", { method: "POST", body: JSON.stringify(data) }),
 };

@@ -1,4 +1,4 @@
-"""API Stack: API Gateway + Lambda functions for SpiderFlow backend."""
+"""API Stack: API Gateway + Lambda functions for SpiderFlow SaaS."""
 import os
 import aws_cdk as cdk
 from aws_cdk import (
@@ -8,20 +8,21 @@ from aws_cdk import (
     aws_dynamodb as dynamodb,
     aws_s3 as s3,
     aws_sqs as sqs,
+    aws_kms as kms,
     CfnOutput,
 )
 from constructs import Construct
 
 
 class ApiStack(cdk.Stack):
-    """REST API backed by Lambda functions, secured with Cognito."""
+    """REST API for SpiderFlow SaaS, secured with Cognito and KMS."""
 
     def __init__(
         self,
         scope: Construct,
         construct_id: str,
         user_pool: cognito.UserPool,
-        sessions_table: dynamodb.Table,
+        rooms_table: dynamodb.Table,
         jobs_table: dynamodb.Table,
         users_table: dynamodb.Table,
         data_bucket: s3.Bucket,
@@ -29,6 +30,15 @@ class ApiStack(cdk.Stack):
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        # ── Encryption Key (KMS) ──
+        self.encryption_key = kms.Key(
+            self,
+            "SpiderFlowKey",
+            description="Key for encrypting user API keys and MongoDB URIs",
+            enable_key_rotation=True,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
 
         # ── Shared Lambda Layer ──
         shared_layer = _lambda.LayerVersion(
@@ -38,118 +48,58 @@ class ApiStack(cdk.Stack):
                 os.path.join(os.path.dirname(__file__), "..", "..", "backend", "layers", "shared")
             ),
             compatible_runtimes=[_lambda.Runtime.PYTHON_3_12],
-            description="Shared utilities for SpiderFlow Lambdas",
         )
 
         # ── Common environment variables ──
         common_env = {
-            "SESSIONS_TABLE": sessions_table.table_name,
+            "ROOMS_TABLE": rooms_table.table_name,
             "JOBS_TABLE": jobs_table.table_name,
             "USERS_TABLE": users_table.table_name,
             "DATA_BUCKET": data_bucket.bucket_name,
             "JOB_QUEUE_URL": job_queue.queue_url,
+            "KMS_KEY_ID": self.encryption_key.key_id,
         }
 
-        # ── Lambda: Sessions Handler ──
-        sessions_fn = _lambda.Function(
-            self,
-            "SessionsHandler",
-            function_name="spiderflow-sessions",
-            runtime=_lambda.Runtime.PYTHON_3_12,
-            handler="handler.lambda_handler",
-            code=_lambda.Code.from_asset(
-                os.path.join(os.path.dirname(__file__), "..", "..", "backend", "functions", "sessions")
-            ),
-            layers=[shared_layer],
-            environment=common_env,
-            timeout=cdk.Duration.seconds(30),
-            memory_size=256,
-        )
-        sessions_table.grant_read_write_data(sessions_fn)
+        # ── Lambda Handlers ──
 
-        # ── Lambda: Jobs Handler ──
-        jobs_fn = _lambda.Function(
-            self,
-            "JobsHandler",
-            function_name="spiderflow-jobs",
-            runtime=_lambda.Runtime.PYTHON_3_12,
-            handler="handler.lambda_handler",
-            code=_lambda.Code.from_asset(
-                os.path.join(os.path.dirname(__file__), "..", "..", "backend", "functions", "jobs")
-            ),
-            layers=[shared_layer],
-            environment=common_env,
-            timeout=cdk.Duration.seconds(30),
-            memory_size=256,
-        )
+        def create_handler(id, name, path, env_extra={}):
+            fn = _lambda.Function(
+                self,
+                id,
+                function_name=f"spiderflow-{name}",
+                runtime=_lambda.Runtime.PYTHON_3_12,
+                handler="handler.lambda_handler",
+                code=_lambda.Code.from_asset(
+                    os.path.join(os.path.dirname(__file__), "..", "..", "backend", "functions", path)
+                ),
+                layers=[shared_layer],
+                environment={**common_env, **env_extra},
+                timeout=cdk.Duration.seconds(30),
+            )
+            return fn
+
+        rooms_fn = create_handler("RoomsHandler", "rooms", "rooms")
+        jobs_fn = create_handler("JobsHandler", "jobs", "jobs")
+        users_fn = create_handler("UsersHandler", "users", "users")
+        billing_fn = create_handler("BillingHandler", "billing", "billing")
+
+        # Permissions
+        rooms_table.grant_read_write_data(rooms_fn)
+        self.encryption_key.grant_encrypt_decrypt(rooms_fn)
+
         jobs_table.grant_read_write_data(jobs_fn)
+        rooms_table.grant_read_data(jobs_fn)
         users_table.grant_read_write_data(jobs_fn)
         job_queue.grant_send_messages(jobs_fn)
 
-        # ── Lambda: Dashboard / Metrics Handler ──
-        dashboard_fn = _lambda.Function(
-            self,
-            "DashboardHandler",
-            function_name="spiderflow-dashboard",
-            runtime=_lambda.Runtime.PYTHON_3_12,
-            handler="handler.lambda_handler",
-            code=_lambda.Code.from_asset(
-                os.path.join(os.path.dirname(__file__), "..", "..", "backend", "functions", "dashboard")
-            ),
-            layers=[shared_layer],
-            environment=common_env,
-            timeout=cdk.Duration.seconds(30),
-            memory_size=256,
-        )
-        sessions_table.grant_read_data(dashboard_fn)
-        jobs_table.grant_read_data(dashboard_fn)
-        data_bucket.grant_read(dashboard_fn)
-
-        # ── Lambda: Data Export Handler ──
-        export_fn = _lambda.Function(
-            self,
-            "ExportHandler",
-            function_name="spiderflow-export",
-            runtime=_lambda.Runtime.PYTHON_3_12,
-            handler="handler.lambda_handler",
-            code=_lambda.Code.from_asset(
-                os.path.join(os.path.dirname(__file__), "..", "..", "backend", "functions", "export")
-            ),
-            layers=[shared_layer],
-            environment={
-                **common_env,
-                "SCRAPED_DATA_BUCKET": data_bucket.bucket_name
-            },
-            timeout=cdk.Duration.seconds(60),
-            memory_size=512,
-        )
-        # Upgraded to read/write for CSV PUT uploads + GeneratePresignedUrl
-        data_bucket.grant_read_write(export_fn)
-        jobs_table.grant_read_data(export_fn)
-
-        # ── Lambda: Users Handler (SaaS Control) ──
-        users_fn = _lambda.Function(
-            self,
-            "UsersHandler",
-            function_name="spiderflow-users",
-            runtime=_lambda.Runtime.PYTHON_3_12,
-            handler="handler.lambda_handler",
-            code=_lambda.Code.from_asset(
-                os.path.join(os.path.dirname(__file__), "..", "..", "backend", "functions", "users")
-            ),
-            layers=[shared_layer],
-            environment=common_env,
-            timeout=cdk.Duration.seconds(20),
-            memory_size=256,
-        )
         users_table.grant_read_write_data(users_fn)
+        
+        users_table.grant_read_write_data(billing_fn)
 
         # ── API Gateway ──
         self.api = apigw.RestApi(
             self,
             "SpiderFlowApi",
-            rest_api_name="SpiderFlow API",
-            description="SpiderFlow Cloud Scraping Platform API",
             default_cors_preflight_options=apigw.CorsOptions(
                 allow_origins=apigw.Cors.ALL_ORIGINS,
                 allow_methods=apigw.Cors.ALL_METHODS,
@@ -157,69 +107,43 @@ class ApiStack(cdk.Stack):
             ),
         )
 
-        # Cognito Authorizer
         authorizer = apigw.CognitoUserPoolsAuthorizer(
-            self,
-            "CognitoAuthorizer",
-            cognito_user_pools=[user_pool],
+            self, "CognitoAuthorizer", cognito_user_pools=[user_pool]
         )
-        # /sessions
-        sessions_resource = self.api.root.add_resource("sessions")
-        sessions_resource.add_method("GET", apigw.LambdaIntegration(sessions_fn),
-                                     authorizer=authorizer,
-                                     authorization_type=apigw.AuthorizationType.COGNITO)
-        sessions_resource.add_method("POST", apigw.LambdaIntegration(sessions_fn),
-                                     authorizer=authorizer,
-                                     authorization_type=apigw.AuthorizationType.COGNITO)
+        auth_opts = {
+            "authorizer": authorizer,
+            "authorization_type": apigw.AuthorizationType.COGNITO,
+        }
 
-        session_item = sessions_resource.add_resource("{sessionId}")
-        session_item.add_method("GET", apigw.LambdaIntegration(sessions_fn),
-                                authorizer=authorizer,
-                                authorization_type=apigw.AuthorizationType.COGNITO)
-        session_item.add_method("PUT", apigw.LambdaIntegration(sessions_fn),
-                                authorizer=authorizer,
-                                authorization_type=apigw.AuthorizationType.COGNITO)
-        session_item.add_method("DELETE", apigw.LambdaIntegration(sessions_fn),
-                                authorizer=authorizer,
-                                authorization_type=apigw.AuthorizationType.COGNITO)
+        # Routes: /users
+        user_res = self.api.root.add_resource("users")
+        me_res = user_res.add_resource("me")
+        me_res.add_method("GET", apigw.LambdaIntegration(users_fn), **auth_opts)
+        me_res.add_resource("init").add_method("POST", apigw.LambdaIntegration(users_fn), **auth_opts)
 
-        # /jobs
-        jobs_resource = self.api.root.add_resource("jobs")
-        jobs_resource.add_method("GET", apigw.LambdaIntegration(jobs_fn),
-                                 authorizer=authorizer,
-                                 authorization_type=apigw.AuthorizationType.COGNITO)
-        jobs_resource.add_method("POST", apigw.LambdaIntegration(jobs_fn),
-                                 authorizer=authorizer,
-                                 authorization_type=apigw.AuthorizationType.COGNITO)
+        # Routes: /rooms
+        rooms_res = self.api.root.add_resource("rooms")
+        rooms_res.add_method("GET", apigw.LambdaIntegration(rooms_fn), **auth_opts)
+        rooms_res.add_method("POST", apigw.LambdaIntegration(rooms_fn), **auth_opts)
 
-        job_item = jobs_resource.add_resource("{jobId}")
-        job_item.add_method("GET", apigw.LambdaIntegration(jobs_fn),
-                            authorizer=authorizer,
-                            authorization_type=apigw.AuthorizationType.COGNITO)
+        room_item = rooms_res.add_resource("{roomId}")
+        room_item.add_method("GET", apigw.LambdaIntegration(rooms_fn), **auth_opts)
+        room_item.add_method("PUT", apigw.LambdaIntegration(rooms_fn), **auth_opts)
+        room_item.add_method("DELETE", apigw.LambdaIntegration(rooms_fn), **auth_opts)
+        room_item.add_resource("verify-mongo").add_method("POST", apigw.LambdaIntegration(rooms_fn), **auth_opts)
 
-        # /dashboard
-        dashboard_resource = self.api.root.add_resource("dashboard")
-        dashboard_resource.add_method("GET", apigw.LambdaIntegration(dashboard_fn),
-                                      authorizer=authorizer,
-                                      authorization_type=apigw.AuthorizationType.COGNITO)
-
-        # /export
-        export_resource = self.api.root.add_resource("export")
-        export_resource.add_method("GET", apigw.LambdaIntegration(export_fn),
-                                   authorizer=authorizer,
-                                   authorization_type=apigw.AuthorizationType.COGNITO)
-
-        # /users
-        users_resource = self.api.root.add_resource("users")
-        me_resource = users_resource.add_resource("me")
-        me_resource.add_method("GET", apigw.LambdaIntegration(users_fn),
-                               authorizer=authorizer,
-                               authorization_type=apigw.AuthorizationType.COGNITO)
+        # Routes: /rooms/{roomId}/jobs
+        jobs_res = room_item.add_resource("jobs")
+        jobs_res.add_method("GET", apigw.LambdaIntegration(jobs_fn), **auth_opts)
+        jobs_res.add_method("POST", apigw.LambdaIntegration(jobs_fn), **auth_opts)
         
-        reset_usage_resource = me_resource.add_resource("reset-usage")
-        reset_usage_resource.add_method("POST", apigw.LambdaIntegration(users_fn),
-                                        authorizer=authorizer,
-                                        authorization_type=apigw.AuthorizationType.COGNITO)
+        job_item = jobs_res.add_resource("{jobId}")
+        job_item.add_method("GET", apigw.LambdaIntegration(jobs_fn), **auth_opts)
 
-        # ── Outputs ──
+        # Routes: /billing
+        billing_res = self.api.root.add_resource("billing")
+        billing_res.add_resource("create-order").add_method("POST", apigw.LambdaIntegration(billing_fn), **auth_opts)
+        billing_res.add_resource("verify-payment").add_method("POST", apigw.LambdaIntegration(billing_fn), **auth_opts)
+
         CfnOutput(self, "ApiUrl", value=self.api.url)
+        CfnOutput(self, "KmsKeyId", value=self.encryption_key.key_id)

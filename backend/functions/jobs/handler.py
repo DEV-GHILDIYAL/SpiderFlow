@@ -1,33 +1,33 @@
-"""Jobs Lambda Handler – Trigger scraping jobs via SQS."""
+"""Jobs Lambda Handler – Trigger and monitor scraping jobs in a Room context."""
 import json
 import os
 import uuid
-
 import boto3
 from boto3.dynamodb.conditions import Key
-
 from shared.utils import build_response, get_user_id, now_iso
 
 dynamodb = boto3.resource("dynamodb")
+rooms_table = dynamodb.Table(os.environ["ROOMS_TABLE"])
 jobs_table = dynamodb.Table(os.environ["JOBS_TABLE"])
 users_table = dynamodb.Table(os.environ["USERS_TABLE"])
 sqs = boto3.client("sqs")
+s3 = boto3.client("s3")
 QUEUE_URL = os.environ["JOB_QUEUE_URL"]
+DATA_BUCKET = os.environ["DATA_BUCKET"]
 
-# Plan Limits
 PLAN_LIMITS = {
-    "trial": 10,
-    "starter": 100,
-    "pro": 1000,
-    "enterprise": float('inf')
+    "trial": {"rooms": 1, "jobs": 10, "pages": 500, "external": False, "code": False},
+    "starter": {"rooms": 5, "jobs": 100, "pages": 5000, "external": True, "code": False},
+    "pro": {"rooms": 20, "jobs": 1000, "pages": 50000, "external": True, "code": True},
+    "enterprise": {"rooms": float('inf'), "jobs": float('inf'), "pages": float('inf'), "external": True, "code": True}
 }
 
-
 def lambda_handler(event, context):
-    """Route requests to job operations."""
     http_method = event["httpMethod"]
     path_params = event.get("pathParameters") or {}
+    room_id = path_params.get("roomId")
     job_id = path_params.get("jobId")
+    path = event.get("path", "")
 
     try:
         user_id = get_user_id(event)
@@ -35,117 +35,109 @@ def lambda_handler(event, context):
         return build_response(401, {"error": str(e)})
 
     try:
-        if http_method == "POST":
-            body = json.loads(event.get("body") or "{}")
-            return trigger_job(user_id, body)
-        elif http_method == "GET":
-            if job_id:
-                return get_job(job_id)
-            else:
-                return list_jobs(user_id)
-        else:
-            return build_response(405, {"error": "Method not allowed"})
+        if http_method == "POST" and room_id and not job_id:
+            return trigger_job(user_id, room_id)
+        elif http_method == "GET" and room_id and not job_id:
+            return list_jobs(room_id)
+        elif http_method == "GET" and room_id and job_id:
+            if path.endswith("/export"):
+                return get_export(user_id, room_id, job_id)
+            return get_job(room_id, job_id)
+        
+        return build_response(405, {"error": "Method not allowed"})
     except Exception as e:
         print(f"Error: {e}")
-        return build_response(500, {"error": "Internal server error"})
+        return build_response(500, {"error": str(e)})
 
-
-def list_jobs(user_id: str):
-    """List all jobs for a user using UserJobsIndex GSI."""
-    response = jobs_table.query(
-        IndexName="UserJobsIndex",
-        KeyConditionExpression=Key("userId").eq(user_id),
-        ScanIndexForward=False,  # Newest first
-    )
+def list_jobs(room_id: str):
+    response = jobs_table.query(KeyConditionExpression=Key("roomId").eq(room_id))
     return build_response(200, response.get("Items", []))
 
-
-def trigger_job(user_id: str, body: dict):
-    """Create a new scraping job after enforcing quotas."""
-    # 1. Fetch user record for quota check
+def trigger_job(user_id: str, room_id: str):
+    # 1. Fetch user for quota check
     user_resp = users_table.get_item(Key={"userId": user_id})
     user = user_resp.get("Item")
-    
     if not user:
-        return build_response(403, {"error": "User profile not found. Please log in again."})
+        return build_response(403, {"error": "User profile not found"})
 
-    plan = user.get("plan", "trial")
-    
-    # 2. Check trial expiration
-    if plan == "trial":
-        expires_at_str = user.get("trialExpiresAt")
-        if expires_at_str:
-            from datetime import datetime
-            expires_at = datetime.fromisoformat(expires_at_str.replace("Z", ""))
-            if datetime.utcnow() > expires_at:
-                return build_response(403, {"error": "Your free trial has expired. Please upgrade to continue."})
+    plan_id = user.get("plan", "trial")
+    limits = PLAN_LIMITS.get(plan_id, PLAN_LIMITS["trial"])
+
+    # 2. Check Trial expiry
+    if plan_id == "trial":
+        from datetime import datetime
+        expires_at = datetime.fromisoformat(user["trialExpiresAt"].replace("Z", ""))
+        if datetime.utcnow() > expires_at:
+            return build_response(403, {"error": "Free trial expired"})
 
     # 3. Check monthly job limit
     jobs_used = int(user.get("jobsUsedThisMonth", 0))
-    limit = PLAN_LIMITS.get(plan, 10)
+    if jobs_used >= limits["jobs"]:
+        return build_response(403, {"error": "Monthly job limit reached"})
+
+    # 4. Fetch room config for provider check
+    room_resp = rooms_table.get_item(Key={"userId": user_id, "roomId": room_id})
+    room = room_resp.get("Item")
+    if not room: return build_response(404, {"error": "Room not found"})
+
+    if room.get("provider") != "internal" and not limits["external"]:
+        return build_response(403, {"error": "External providers require Starter plan+"})
     
-    if jobs_used >= limit:
-        return build_response(403, {"error": "Monthly job limit reached. Please upgrade your plan."})
+    if room.get("scrapingMethod") == "custom_code" and not limits["code"]:
+        return build_response(403, {"error": "Custom code requires Pro plan+"})
 
-    # 4. Success -> Proceed with job creation
-    session_id = body.get("sessionId")
-    if not session_id:
-        return build_response(400, {"error": "sessionId is required"})
-
+    # 5. Success -> Trigger
     job_id = str(uuid.uuid4())
     now = now_iso()
-
+    
     job_item = {
-        "sessionId": session_id,
+        "roomId": room_id,
         "jobId": job_id,
         "userId": user_id,
-        "status": "queued",
-        "createdAt": now,
-        "updatedAt": now,
+        "status": "pending",
+        "provider": room.get("provider", "internal"),
         "pagesScraped": 0,
-        "itemsExtracted": 0,
-        "errors": [],
-    }
-
-    # Save job record
-    jobs_table.put_item(Item=job_item)
-
-    # 5. Increment jobsUsedThisMonth
-    users_table.update_item(
-        Key={"userId": user_id},
-        UpdateExpression="SET jobsUsedThisMonth = jobsUsedThisMonth + :inc, updatedAt = :now",
-        ExpressionAttributeValues={
-            ":inc": 1,
-            ":now": now
-        }
-    )
-
-    # Publish to SQS
-    sqs_params = {
-        "QueueUrl": QUEUE_URL,
-        "MessageBody": json.dumps({
-            "jobId": job_id,
-            "sessionId": session_id,
-            "userId": user_id,
-        })
+        "itemsFound": 0,
+        "logs": ["Job queued."],
+        "createdAt": now,
+        "updatedAt": now
     }
     
-    if ".fifo" in QUEUE_URL:
-        sqs_params["MessageGroupId"] = session_id
-        
-    sqs.send_message(**sqs_params)
+    jobs_table.put_item(Item=job_item)
+    
+    # Increment user usage
+    users_table.update_item(
+        Key={"userId": user_id},
+        UpdateExpression="SET jobsUsedThisMonth = jobsUsedThisMonth + :inc",
+        ExpressionAttributeValues={":inc": 1}
+    )
 
+    sqs.send_message(
+        QueueUrl=QUEUE_URL,
+        MessageBody=json.dumps({
+            "jobId": job_id,
+            "roomId": room_id,
+            "userId": user_id
+        })
+    )
+    
     return build_response(201, job_item)
 
-
-def get_job(job_id: str):
-    """Get job status and details. Scans for simplicity – could be improved with GSI."""
-    # We use the StatusIndex GSI or scan; for now, scan by jobId
-    response = jobs_table.scan(
-        FilterExpression="jobId = :jid",
-        ExpressionAttributeValues={":jid": job_id},
-    )
-    items = response.get("Items", [])
-    if not items:
+def get_job(room_id: str, job_id: str):
+    response = jobs_table.get_item(Key={"roomId": room_id, "jobId": job_id})
+    item = response.get("Item")
+    if not item:
         return build_response(404, {"error": "Job not found"})
-    return build_response(200, items[0])
+    return build_response(200, item)
+
+def get_export(user_id: str, room_id: str, job_id: str):
+    # Expect results at results/{userId}/{roomId}/{jobId}/output.json
+    key = f"results/{user_id}/{room_id}/{job_id}/output.json"
+    
+    url = s3.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': DATA_BUCKET, 'Key': key},
+        ExpiresIn=3600
+    )
+    
+    return build_response(200, {"downloadUrl": url})
